@@ -1,5 +1,6 @@
 #include <CLI/CLI.hpp>
 #include <tacpp/core/log.h>
+#include <tacpp/main/tacpp_input.h>
 #include <tacpp/main/version.h>
 
 int main(int argc, char *argv[]) {
@@ -19,6 +20,7 @@ int main(int argc, char *argv[]) {
   verbosity_option->force_callback();
 
   // add all the subcommands here
+  auto *inp = tacpp::main::add_input_subcommand(app);
 
   // ensure we have a subcommand
   app.require_subcommand(/* min */ 0, /* max */ 0);

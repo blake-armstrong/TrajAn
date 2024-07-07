@@ -1,3 +1,4 @@
+#include <Eigen/Core>
 #include <fmt/core.h>
 #include <tacpp/core/log.h>
 #include <tacpp/main/version.h>
@@ -8,6 +9,9 @@ void print_header() {
   const int fmt_major = FMT_VERSION / 10000;
   const int fmt_minor = (FMT_VERSION % 10000) / 100;
   const int fmt_patch = (FMT_VERSION % 100);
+  const auto eigen_version_string =
+      fmt::format("{}.{}.{}", EIGEN_WORLD_VERSION, EIGEN_MAJOR_VERSION,
+                  EIGEN_MINOR_VERSION);
   const std::string fmt_version_string =
       fmt::format("{}.{}.{}", fmt_major, fmt_minor, fmt_patch);
   const std::string spdlog_version_string = fmt::format(
@@ -24,10 +28,11 @@ copyright (C) 2024 -> Blake Armstrong
 this version of tacpp makes use of the following third party libraries:
 
 CLI11                command line argument parser
+eigen3               Linear Algebra (v {})
 fmt                  String formatting (v {})
 spdlog               Logging (v {})
 
 )",
-            fmt_version_string, spdlog_version_string);
+            eigen_version_string, fmt_version_string, spdlog_version_string);
 }
 } // namespace tacpp::main
