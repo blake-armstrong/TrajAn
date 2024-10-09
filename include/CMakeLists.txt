@@ -1,12 +1,12 @@
-add_subdirectory(tacpp/core)
-add_subdirectory(tacpp/io)
-add_subdirectory(tacpp/main)
+add_subdirectory(trajan/core)
+add_subdirectory(trajan/io)
+add_subdirectory(trajan/main)
 
-set(TACPP_INCLUDE_FILES
-    "${TACPP_CORE_INCLUDE_FILES}" "${TACPP_IO_INCLUDE_FILES}"
-    "${TACPP_MAIN_INCLUDE_FILES}"
+set(TRAJAN_INCLUDE_FILES
+    "${TRAJAN_CORE_INCLUDE_FILES}" "${TRAJAN_IO_INCLUDE_FILES}"
+    "${TRAJAN_MAIN_INCLUDE_FILES}"
     PARENT_SCOPE)
 
-set(TACPP_INCLUDE_DIR
+set(TRAJAN_INCLUDE_DIR
     ${CMAKE_CURRENT_SOURCE_DIR}
     PARENT_SCOPE)

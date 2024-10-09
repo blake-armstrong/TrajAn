@@ -1,6 +1,6 @@
 #pragma once
 
-namespace tacpp::main {
+namespace trajan::main {
 
 void print_header();
 

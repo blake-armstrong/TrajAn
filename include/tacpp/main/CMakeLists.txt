@@ -1,5 +1,0 @@
-set(TACPP_MAIN_INCLUDE_FILES
-    "${CMAKE_CURRENT_SOURCE_DIR}/tacpp.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/tacpp_input.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/version.h"
-    PARENT_SCOPE)

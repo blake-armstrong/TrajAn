@@ -1,9 +1,9 @@
 #include <Eigen/Core>
 #include <fmt/core.h>
-#include <tacpp/core/log.h>
-#include <tacpp/main/version.h>
+#include <trajan/core/log.h>
+#include <trajan/main/version.h>
 
-namespace tacpp::main {
+namespace trajan::main {
 
 void print_header() {
   const int fmt_major = FMT_VERSION / 10000;
@@ -25,7 +25,7 @@ a program for molecular dynamics analysis.
 
 copyright (C) 2024 -> Blake Armstrong
 
-this version of tacpp makes use of the following third party libraries:
+this version of trajan makes use of the following third party libraries:
 
 CLI11                command line argument parser
 eigen3               Linear Algebra (v {})
@@ -35,4 +35,4 @@ spdlog               Logging (v {})
 )",
             eigen_version_string, fmt_version_string, spdlog_version_string);
 }
-} // namespace tacpp::main
+} // namespace trajan::main

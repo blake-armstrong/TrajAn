@@ -1,7 +1,7 @@
 
 #pragma once
 
-namespace tacpp::core {
+namespace trajan::core {
 
 int radial_distribution_func();
 

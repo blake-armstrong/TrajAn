@@ -1,7 +1,10 @@
-set(TACPP_CORE_INCLUDE_FILES
+set(TRAJAN_CORE_INCLUDE_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/radial_distribution_func.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/log.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/util.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/atom.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/molecule.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/trajectory.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/frame.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/linear_algebra.h"
     PARENT_SCOPE)

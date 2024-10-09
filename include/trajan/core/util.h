@@ -1,6 +1,10 @@
 #pragma once
 
-namespace tacpp::util {
+#include <algorithm>
+#include <cctype>
+#include <string>
+
+namespace trajan::util {
 
 static inline void to_lower(std::string &s) {
   std::transform(s.begin(), s.end(), s.begin(),
@@ -12,4 +16,4 @@ static inline std::string to_lower_copy(std::string s) {
   return s;
 }
 
-} // namespace tacpp::util
+} // namespace trajan::util

@@ -1,7 +1,7 @@
 #pragma once
 #include <spdlog/spdlog.h>
 
-namespace tacpp::log {
+namespace trajan::log {
 using spdlog::critical;
 using spdlog::debug;
 using spdlog::error;
@@ -22,4 +22,4 @@ using spdlog::level::warn;
 void setup_logging(const std::string &verbosity);
 void setup_logging(int verbosity);
 
-} // namespace tacpp::log
+} // namespace trajan::log

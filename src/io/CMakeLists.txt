@@ -1,4 +1,10 @@
-add_library(tacpp_io "${CMAKE_CURRENT_SOURCE_DIR}/pdb.cpp")
-target_include_directories(tacpp_io PUBLIC "${TACPP_INCLUDE_DIR}")
+add_library(trajan_io "${CMAKE_CURRENT_SOURCE_DIR}/pdb.cpp"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/dcd.cpp"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/file.cpp"
+)
 
-target_compile_features(tacpp_io PUBLIC cxx_std_20)
+target_link_libraries(trajan_io PUBLIC Eigen3::Eigen fmt::fmt spdlog::spdlog)
+
+target_include_directories(trajan_io PUBLIC "${TRAJAN_INCLUDE_DIR}")
+
+target_compile_features(trajan_io PUBLIC cxx_std_20)
