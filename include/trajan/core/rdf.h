@@ -3,6 +3,6 @@
 
 namespace trajan::core {
 
-int radial_distribution_func();
+int rdf();
 
 }

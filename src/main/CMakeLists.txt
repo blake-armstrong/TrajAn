@@ -1,8 +1,7 @@
 add_executable(
   trajan
-  "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/trajan.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/input.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/trajan_rdf.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/version.cpp")
 target_link_libraries(trajan PUBLIC trajan_core trajan_io CLI11::CLI11)
 
