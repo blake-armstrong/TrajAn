@@ -19,6 +19,10 @@ struct Atom {
 
   inline Atom create_ghost(Vec3 shift) const { return Atom(*this, shift); }
 
+  inline void update_position(const Vec3 &pos) {
+    x = pos.x(), y = pos.y(), z = pos.z();
+  }
+
   // convenience helper to convert this position into \a Vec3
   inline Vec3 position() const { return {x, y, z}; }
 

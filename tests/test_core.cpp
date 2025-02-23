@@ -15,7 +15,7 @@
 #include <trajan/core/units.h>
 #include <vector>
 
-using trajan::Mat3;
+using trajan::Mat3N;
 using trajan::Vec3;
 using trajan::core::Atom;
 using trajan::core::Cell;
@@ -85,30 +85,24 @@ TEST_CASE("Element constructor with edge cases", "[element]") {
   }
 }
 
-// Helper function to create a cubic unit cell
-UnitCell create_cubic_cell(double length = 10.0) {
-  Mat3 lattice;
-  lattice << length, 0.0, 0.0, 0.0, length, 0.0, 0.0, 0.0, length;
-  return UnitCell(lattice);
-}
-
 // Helper function to generate random atoms within a unit cell
-std::vector<Atom> generate_random_atoms(const UnitCell &cell, int num_atoms) {
-  std::vector<Atom> atoms;
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_real_distribution<> dis(0.0, 1.0);
-
-  for (int i = 0; i < num_atoms; ++i) {
-    Vec3 position(dis(gen), dis(gen), dis(gen));
-    position = cell.to_cartesian(position);
-    atoms.emplace_back(position, 0, i);
-  }
-  return atoms;
-}
+// std::vector<Atom> generate_random_atoms(const UnitCell &cell, int num_atoms)
+// {
+//   std::vector<Atom> atoms;
+//   std::random_device rd;
+//   std::mt19937 gen(rd());
+//   std::uniform_real_distribution<> dis(0.0, 1.0);
+//
+//   for (int i = 0; i < num_atoms; ++i) {
+//     Vec3 position(dis(gen), dis(gen), dis(gen));
+//     position = cell.to_cartesian(position);
+//     atoms.emplace_back(position, 0, i);
+//   }
+//   return atoms;
+// }
 
 TEST_CASE("CellList Basic Construction", "[cell_list]") {
-  auto unit_cell = create_cubic_cell(10.0);
+  auto unit_cell = trajan::core::cubic_cell(10.0);
   double cutoff = 2.0;
 
   SECTION("Construction with single thread") {
@@ -157,19 +151,24 @@ template <typename Func> double measure_execution_time(Func &&func) {
 TEST_CASE("CellList vs Double Loop Comparison", "[cell_list]") {
   const double box_size = 25.0;
   UnitCell unit_cell = trajan::core::cubic_cell(box_size);
-  const int num_atoms = 5000;
+  const int num_atoms = 10000;
   const double cutoff = 9.0;
   const int num_threads = 1;
   std::vector<Atom> atoms;
   atoms.reserve(num_atoms);
   std::random_device rd;
   std::mt19937 gen(rd());
-  std::uniform_real_distribution<> dis(0.0, box_size);
+  // std::mt19937 gen(42);
+  std::uniform_real_distribution<> dis(-5, box_size + 5);
 
   // create atoms with random positions
+  Mat3N atoms_pos(3, num_atoms);
   for (int i = 0; i < num_atoms; ++i) {
     Vec3 position(dis(gen), dis(gen), dis(gen));
     atoms.emplace_back(position, 0, i);
+    atoms_pos(0, i) = position.x();
+    atoms_pos(1, i) = position.y();
+    atoms_pos(2, i) = position.z();
   }
 
   SECTION("Comparing pair counting between methods") {
@@ -179,9 +178,10 @@ TEST_CASE("CellList vs Double Loop Comparison", "[cell_list]") {
     // count pairs using cell list
     CellList cell_list(unit_cell, cutoff, num_threads);
     double cell_list_time = measure_execution_time([&]() {
-      cell_list.update(atoms);
-      cell_list.for_each_pair(
-          [&](const Atom &a1, const Atom &a2) { cell_list_pairs++; });
+      cell_list.update(atoms, atoms_pos);
+      cell_list.for_each_pair([&](const Atom &a1, const Atom &a2, double rsq) {
+        cell_list_pairs++;
+      });
     });
 
     // count pairs using double loop
@@ -204,7 +204,6 @@ TEST_CASE("CellList vs Double Loop Comparison", "[cell_list]") {
     INFO("Box size: " << box_size << "x" << box_size << "x" << box_size);
     INFO("Cutoff distance: " << cutoff);
     INFO("Number of threads: " << num_threads);
-
     // estimate the expected number of pairs
     double volume = box_size * box_size * box_size;
     double expected_pairs_per_atom =
@@ -213,7 +212,6 @@ TEST_CASE("CellList vs Double Loop Comparison", "[cell_list]") {
     INFO("Expected approximate number of pairs: ~" << total_expected_pairs);
     INFO("Pairs found (cell list): " << cell_list_pairs);
     INFO("Pairs found (double loop): " << double_loop_pairs);
-
     // Verify that both methods find the same number of pairs
     REQUIRE(cell_list_pairs == double_loop_pairs);
     REQUIRE(static_cast<double>(cell_list_pairs) > total_expected_pairs * 0.8);
@@ -221,15 +219,8 @@ TEST_CASE("CellList vs Double Loop Comparison", "[cell_list]") {
     INFO("Cell list execution time: " << cell_list_time << " seconds");
     INFO("Double loop execution time: " << double_loop_time << " seconds");
     INFO("Speed-up factor: " << double_loop_time / cell_list_time);
-
     // cell list should be faster
     REQUIRE(double_loop_time > cell_list_time);
-
-    // for this system size, we expect at least a 10x speedup
-    // NOTE: actual speedup depends on hardware and implementation details
-    // INFO("Minimum expected speedup: 10x");
-    // INFO("Actual speedup: " << double_loop_time / cell_list_time);
-    // REQUIRE(double_loop_time / cell_list_time > 10.0);
   }
 }
 
