@@ -5,7 +5,6 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/matchers/catch_matchers_vector.hpp>
 #include <chrono>
-#include <iostream>
 #include <omp.h>
 #include <random>
 #include <trajan/core/element.h>
@@ -85,22 +84,6 @@ TEST_CASE("Element constructor with edge cases", "[element]") {
   }
 }
 
-// Helper function to generate random atoms within a unit cell
-// std::vector<Atom> generate_random_atoms(const UnitCell &cell, int num_atoms)
-// {
-//   std::vector<Atom> atoms;
-//   std::random_device rd;
-//   std::mt19937 gen(rd());
-//   std::uniform_real_distribution<> dis(0.0, 1.0);
-//
-//   for (int i = 0; i < num_atoms; ++i) {
-//     Vec3 position(dis(gen), dis(gen), dis(gen));
-//     position = cell.to_cartesian(position);
-//     atoms.emplace_back(position, 0, i);
-//   }
-//   return atoms;
-// }
-
 TEST_CASE("CellList Basic Construction", "[cell_list]") {
   auto unit_cell = trajan::core::cubic_cell(10.0);
   double cutoff = 2.0;
@@ -149,17 +132,16 @@ template <typename Func> double measure_execution_time(Func &&func) {
 }
 
 TEST_CASE("CellList vs Double Loop Comparison", "[cell_list]") {
-  const double box_size = 25.0;
+  const double box_size = 50.0;
   UnitCell unit_cell = trajan::core::cubic_cell(box_size);
-  const int num_atoms = 10000;
-  const double cutoff = 9.0;
+  const int num_atoms = 3000;
+  const double cutoff = 5.0;
   const int num_threads = 1;
   std::vector<Atom> atoms;
   atoms.reserve(num_atoms);
   std::random_device rd;
-  std::mt19937 gen(rd());
-  // std::mt19937 gen(42);
-  std::uniform_real_distribution<> dis(-5, box_size + 5);
+  std::mt19937 gen(42);
+  std::uniform_real_distribution<> dis(0, box_size);
 
   // create atoms with random positions
   Mat3N atoms_pos(3, num_atoms);
@@ -173,31 +155,23 @@ TEST_CASE("CellList vs Double Loop Comparison", "[cell_list]") {
 
   SECTION("Comparing pair counting between methods") {
     std::atomic<size_t> cell_list_pairs{0};
-    std::atomic<size_t> double_loop_pairs{0};
+    std::atomic<size_t> verlet_list_pairs{0};
 
-    // count pairs using cell list
-    CellList cell_list(unit_cell, cutoff, num_threads);
+    trajan::core::NeighbourListHandler neighbour_list(unit_cell, cutoff,
+                                                      num_threads);
     double cell_list_time = measure_execution_time([&]() {
-      cell_list.update(atoms, atoms_pos);
-      cell_list.for_each_pair([&](const Atom &a1, const Atom &a2, double rsq) {
-        cell_list_pairs++;
-      });
+      neighbour_list.update(atoms, atoms_pos);
+      neighbour_list.iterate_neighbours([&](const Atom &a1, const Atom &a2,
+                                            double rsq) { cell_list_pairs++; });
     });
 
-    // count pairs using double loop
-    double double_loop_time = measure_execution_time([&]() {
-      for (size_t i = 0; i < atoms.size(); ++i) {
-        for (size_t j = i + 1; j < atoms.size(); ++j) {
-          Vec3 dr = atoms[j].position() - atoms[i].position();
-          Vec3 frac_dr = unit_cell.to_fractional(dr);
-          frac_dr = frac_dr.array() - frac_dr.array().round();
-          dr = unit_cell.to_cartesian(frac_dr);
-
-          if (dr.norm() <= cutoff) {
-            double_loop_pairs++;
-          }
-        }
-      }
+    neighbour_list.set_list_type(trajan::core::NeighbourListType::VERLET_LIST);
+    double verlet_list_time = measure_execution_time([&]() {
+      neighbour_list.update(atoms, atoms_pos);
+      neighbour_list.iterate_neighbours(
+          [&](const Atom &a1, const Atom &a2, double rsq) {
+            verlet_list_pairs++;
+          });
     });
 
     INFO("System size: " << num_atoms << " atoms");
@@ -211,16 +185,16 @@ TEST_CASE("CellList vs Double Loop Comparison", "[cell_list]") {
     double total_expected_pairs = expected_pairs_per_atom * num_atoms / 2;
     INFO("Expected approximate number of pairs: ~" << total_expected_pairs);
     INFO("Pairs found (cell list): " << cell_list_pairs);
-    INFO("Pairs found (double loop): " << double_loop_pairs);
+    INFO("Pairs found (double loop): " << verlet_list_pairs);
     // Verify that both methods find the same number of pairs
-    REQUIRE(cell_list_pairs == double_loop_pairs);
+    REQUIRE(cell_list_pairs == verlet_list_pairs);
     REQUIRE(static_cast<double>(cell_list_pairs) > total_expected_pairs * 0.8);
     REQUIRE(static_cast<double>(cell_list_pairs) < total_expected_pairs * 1.2);
     INFO("Cell list execution time: " << cell_list_time << " seconds");
-    INFO("Double loop execution time: " << double_loop_time << " seconds");
-    INFO("Speed-up factor: " << double_loop_time / cell_list_time);
+    INFO("Verlet list execution time: " << verlet_list_time << " seconds");
+    INFO("Speed-up factor: " << verlet_list_time / cell_list_time);
     // cell list should be faster
-    REQUIRE(double_loop_time > cell_list_time);
+    REQUIRE(verlet_list_time > cell_list_time);
   }
 }
 

@@ -9,6 +9,7 @@
 
 namespace trajan::core {
 
+// cell list algorithm for neighbours
 struct CellIndex {
   size_t a, b, c;
 };
@@ -53,7 +54,7 @@ class CellList {
 public:
   CellList(const UnitCell &unit_cell, double cutoff, int num_threads);
   void update(const std::span<Atom> atoms, Mat3N atoms_pos);
-  template <typename Func> void for_each_pair(Func &&func) const;
+  template <typename Func> void cell_loop(Func &&func) const;
 
 private:
   static constexpr size_t NUMGHOSTS = 2;
@@ -80,7 +81,7 @@ private:
   void clear_cells();
 };
 
-template <typename Func> void CellList::for_each_pair(Func &&func) const {
+template <typename Func> void CellList::cell_loop(Func &&func) const {
 #pragma omp parallel for num_threads(m_num_threads)
   for (size_t cell_i = 0; cell_i < m_params.total_real; cell_i++) {
     size_t center_cell_idx = m_cell_indices[cell_i];
@@ -109,4 +110,128 @@ template <typename Func> void CellList::for_each_pair(Func &&func) const {
     }
   }
 }
+
+// verlet/double loop algorithm for neighbours
+class VerletList {
+public:
+  VerletList(const UnitCell &unit_cell, double cutoff, int num_threads);
+  void update(const std::span<Atom> atoms, Mat3N atoms_pos);
+  template <typename Func> void verlet_loop(Func &&func) const;
+
+private:
+  const UnitCell &m_unit_cell;
+  const double m_cutoff, m_cutoffsq;
+  const int m_num_threads;
+  std::span<Atom> m_atoms;
+  Mat3N m_atom_positions;
+};
+
+template <typename Func> void VerletList::verlet_loop(Func &&func) const {
+#pragma omp parallel for collapse(2) num_threads(m_num_threads)
+  for (size_t i = 0; i < m_atoms.size(); ++i) {
+    for (size_t j = i + 1; j < m_atoms.size(); ++j) {
+      Vec3 dr = m_atoms[j].position() - m_atoms[i].position();
+      Vec3 frac_dr = m_unit_cell.to_fractional(dr);
+      frac_dr = frac_dr.array() - frac_dr.array().round();
+      dr = m_unit_cell.to_cartesian(frac_dr);
+      double rsq = dr.squaredNorm();
+      if (rsq <= m_cutoffsq) {
+        func(m_atoms[i], m_atoms[j], rsq);
+      }
+    }
+  }
+};
+
+// generic neighbour class:
+// allows easy switching between algorithms
+using NeighbourCallback =
+    std::function<void(const Atom &, const Atom &, double)>;
+
+class INeighbourList {
+public:
+  virtual ~INeighbourList() = default;
+  virtual void update(const std::span<Atom> atoms, Mat3N atoms_pos) = 0;
+  virtual void iterate_neighbours(const NeighbourCallback &callback) const = 0;
+};
+
+class CellListNeighbours : public INeighbourList {
+public:
+  CellListNeighbours(const UnitCell &unit_cell, double cutoff, int num_threads)
+      : m_cell_list(unit_cell, cutoff, num_threads) {}
+  void update(const std::span<Atom> atoms, Mat3N atoms_pos) override {
+    m_cell_list.update(atoms, atoms_pos);
+  }
+  void iterate_neighbours(const NeighbourCallback &callback) const override {
+    m_cell_list.cell_loop(callback);
+  }
+
+private:
+  CellList m_cell_list;
+};
+
+class VerletListNeighbours : public INeighbourList {
+public:
+  VerletListNeighbours(const UnitCell &unit_cell, double cutoff,
+                       int num_threads)
+      : m_verlet_list(unit_cell, cutoff, num_threads) {}
+  void update(const std::span<Atom> atoms, Mat3N atoms_pos) override {
+    m_verlet_list.update(atoms, atoms_pos);
+  }
+  void iterate_neighbours(const NeighbourCallback &callback) const override {
+    m_verlet_list.verlet_loop(callback);
+  }
+
+private:
+  VerletList m_verlet_list;
+};
+
+enum class NeighbourListType { CELL_LIST, VERLET_LIST };
+
+class NeighbourListHandler {
+public:
+  NeighbourListHandler(const UnitCell &unit_cell, double cutoff,
+                       int num_threads,
+                       NeighbourListType type = NeighbourListType::CELL_LIST)
+      : m_unit_cell(unit_cell), m_cutoff(cutoff), m_num_threads(num_threads) {
+    set_list_type(type);
+  }
+  void set_list_type(NeighbourListType type) {
+    switch (type) {
+    case NeighbourListType::CELL_LIST:
+      m_neighbour_list = std::make_unique<CellListNeighbours>(
+          m_unit_cell, m_cutoff, m_num_threads);
+      break;
+    case NeighbourListType::VERLET_LIST:
+      m_neighbour_list = std::make_unique<VerletListNeighbours>(
+          m_unit_cell, m_cutoff, m_num_threads);
+      break;
+    }
+  }
+  void set_list_type(const std::string &type_str) {
+    if (type_str == "cell" || type_str == "cell_list") {
+      set_list_type(NeighbourListType::CELL_LIST);
+    } else if (type_str == "verlet" || type_str == "verlet_list") {
+      set_list_type(NeighbourListType::VERLET_LIST);
+    } else {
+      throw std::runtime_error("Unknown neighbour list type: " + type_str);
+    }
+  }
+  void update(const std::span<Atom> atoms, Mat3N atoms_pos) {
+    m_neighbour_list->update(atoms, atoms_pos);
+  }
+  void iterate_neighbours(const NeighbourCallback &callback) const {
+    m_neighbour_list->iterate_neighbours(callback);
+  }
+  template <typename Func> void for_each_neighbour(Func &&func) const {
+    NeighbourCallback callback = std::forward<Func>(func);
+    iterate_neighbours(callback);
+  }
+
+private:
+  const UnitCell &m_unit_cell;
+  double m_cutoff;
+  int m_num_threads;
+  std::unique_ptr<INeighbourList> m_neighbour_list;
+};
+
 }; // namespace trajan::core

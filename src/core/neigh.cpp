@@ -57,10 +57,9 @@ void CellList::initialise_cells() {
                   (na == 0 && nb == 0 && nc <= 0)) {
                 continue;
               }
-              neighs.push_back(
-                  linear_index(static_cast<size_t>(static_cast<int>(a) + na),
-                               static_cast<size_t>(static_cast<int>(b) + nb),
-                               static_cast<size_t>(static_cast<int>(c) + nc)));
+              neighs.push_back(linear_index(static_cast<size_t>(a + na),
+                                            static_cast<size_t>(b + nb),
+                                            static_cast<size_t>(c + nc)));
             }
           }
         }
@@ -133,4 +132,19 @@ void CellList::update(const std::span<Atom> atoms, const Mat3N atoms_pos) {
     }
   }
 }
+
+VerletList::VerletList(const UnitCell &unit_cell, double cutoff,
+                       int num_threads)
+    : m_unit_cell(unit_cell), m_cutoff(cutoff), m_cutoffsq(cutoff * cutoff),
+      m_num_threads(num_threads) {
+  if (m_num_threads > 0) {
+    omp_set_num_threads(m_num_threads);
+  }
+}
+
+void VerletList::update(const std::span<Atom> atoms, Mat3N atom_positions) {
+  m_atoms = atoms;
+  m_atom_positions = atom_positions;
+}
+
 } // namespace trajan::core

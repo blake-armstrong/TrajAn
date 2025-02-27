@@ -1,5 +1,5 @@
 build/
 CMakeLists.txt.user
 .vscode/
-.cache
+.cache/
 .DS_Store
