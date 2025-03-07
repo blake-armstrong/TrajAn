@@ -20,6 +20,14 @@ void Frame::set_atoms(std::vector<Atom> &atoms) {
   }
   m_num_atoms = num_atoms;
   m_atoms = atoms;
+  Mat3N atoms_pos(3, num_atoms);
+  for (int i = 0; i < m_num_atoms; ++i) {
+    Atom atom = atoms[i];
+    atoms_pos(0, i) = atom.x;
+    atoms_pos(1, i) = atom.y;
+    atoms_pos(2, i) = atom.z;
+  }
+  m_atom_positions = atoms_pos;
 };
 
 } // namespace trajan::core

@@ -2,6 +2,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <trajan/core/atom.h>
+#include <trajan/core/element.h>
 #include <trajan/core/frame.h>
 #include <trajan/core/log.h>
 #include <trajan/io/file.h>
@@ -26,31 +27,41 @@ bool PDBHandler::read_frame(core::Frame &frame) {
       char record_name[7], sg[12], z[5];
       int result = std::sscanf(line.c_str(), PDB_CRYST_FMT.data(), record_name,
                                &a, &b, &c, &alpha, &beta, &gamma, sg, z);
-      core::UnitCell();
+      core::UnitCell uc(a, b, c, alpha, beta, gamma);
+      frame.set_uc(uc);
       continue;
     }
     if (line.substr(0, 4) != "ATOM" && line.substr(0, 6) != "HETATM") {
       continue;
     };
     core::Atom atom;
-    // atom.element = core::Element(0);
-    char record_name[7], name[5], altLoc, resName[4], i_code, element[3],
-        charge[3], chainID;
+    char record_name[7], name_buffer[5], altLoc, resName[4], i_code,
+        element_buffer[3], charge[3], chainID;
     int serial, res_seq;
     double occupancy, temp_factor;
 
-    // Format string based on PDB standard
+    // format string based on PDB standard
     int result = std::sscanf(line.c_str(), PDB_LINE_FMT.data(), record_name,
-                             &serial, name, &altLoc, resName, &chainID,
+                             &serial, name_buffer, &altLoc, resName, &chainID,
                              &res_seq, &i_code, &atom.x, &atom.y, &atom.z,
-                             &occupancy, &temp_factor, element, charge);
+                             &occupancy, &temp_factor, element_buffer, charge);
 
-    if (result == 15) {
-      atoms.push_back(atom);
-    } else {
-      std::runtime_error(
-          fmt::format("Warning: Failed to parse line: '{}'", line));
+    if (result != 15) {
+      std::runtime_error(fmt::format("Failed to parse line: '{}'", line));
     }
+
+    std::string element_identifier;
+    bool exact;
+    std::string element = element_buffer;
+    if (!element.empty()) {
+      exact = true;
+      element_identifier = element;
+    } else {
+      exact = false;
+      element_identifier = name_buffer;
+    }
+    atom.element = core::Element(element_identifier, exact);
+    atoms.push_back(atom);
   }
   frame.set_atoms(atoms);
   return false;

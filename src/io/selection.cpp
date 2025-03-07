@@ -26,8 +26,7 @@ SelectionParser::parse_selection(const std::string &input) {
 
         if constexpr (std::is_integral_v<ValueType>) {
           for (ValueType i = range->first; i <= range->second; ++i) {
-            values.push_back(
-                i); //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+            values.push_back(i);
           }
         }
       } else {
@@ -72,4 +71,15 @@ SelectionParser::parse(const std::string &input) {
     return std::nullopt;
   }
 }
+
+// auto selection_validator = [](std::optional<SelectionCriteria> &parsed_sel) {
+//   return [parsed_sel = &parsed_sel](const std::string &input) {
+//     auto result = SelectionParser::parse(input);
+//     if (!result) {
+//       return std::string("Invalid selection format");
+//     }
+//     *parsed_sel = result;
+//     return std::string();
+//   };
+// };
 } // namespace trajan::io

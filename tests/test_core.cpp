@@ -1,4 +1,3 @@
-// tests
 #include <catch2/benchmark/catch_benchmark.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -9,6 +8,7 @@
 #include <random>
 #include <trajan/core/element.h>
 #include <trajan/core/linear_algebra.h>
+#include <trajan/core/molecule.h>
 #include <trajan/core/neigh.h>
 #include <trajan/core/unit_cell.h>
 #include <trajan/core/units.h>
@@ -20,6 +20,7 @@ using trajan::core::Atom;
 using trajan::core::Cell;
 using trajan::core::CellList;
 using trajan::core::Element;
+using trajan::core::Molecule;
 using trajan::core::UnitCell;
 
 namespace units = trajan::units;
@@ -157,8 +158,7 @@ TEST_CASE("CellList vs Double Loop Comparison", "[cell_list]") {
     std::atomic<size_t> cell_list_pairs{0};
     std::atomic<size_t> verlet_list_pairs{0};
 
-    trajan::core::NeighbourListHandler neighbour_list(unit_cell, cutoff,
-                                                      num_threads);
+    trajan::core::NeighbourList neighbour_list(unit_cell, cutoff, num_threads);
     double cell_list_time = measure_execution_time([&]() {
       neighbour_list.update(atoms, atoms_pos);
       neighbour_list.iterate_neighbours([&](const Atom &a1, const Atom &a2,
@@ -197,98 +197,216 @@ TEST_CASE("CellList vs Double Loop Comparison", "[cell_list]") {
     REQUIRE(verlet_list_time > cell_list_time);
   }
 }
+TEST_CASE("Molecule construction from atoms", "[molecule]") {
+  SECTION("Empty molecule") {
+    std::vector<Atom> atoms;
+    Molecule molecule(atoms);
 
-// TEST_CASE("CellList Performance", "[cell_list_performance]") {
-//   const double box_size = 25.0;
-//   const double cutoff = 9.0;
-//   const int num_atoms = 5000;
-//
-//   // Create unit cell and atoms
-//   UnitCell unit_cell = trajan::core::cubic_cell(box_size);
-//   std::vector<Atom> atoms;
-//   atoms.reserve(num_atoms);
-//
-//   // Create deterministic random number generator for reproducible tests
-//   std::mt19937 gen(42);
-//   std::uniform_real_distribution<> dis(0.0, box_size);
-//
-//   for (int i = 0; i < num_atoms; ++i) {
-//     Vec3 position(dis(gen), dis(gen), dis(gen));
-//     atoms.emplace_back(position, 0, i);
-//   }
-//
-//   SECTION("Correctness Test") {
-//     // Create two cell lists with different thread counts
-//     CellList cell_list_single(unit_cell, cutoff, 1);
-//     CellList cell_list_multi(unit_cell, cutoff, 4);
-//
-//     // Update both cell lists
-//     cell_list_single.update(atoms);
-//     cell_list_multi.update(atoms);
-//
-//     // Count pairs in both cell lists
-//     std::atomic<size_t> pairs_single{0};
-//     std::atomic<size_t> pairs_multi{0};
-//     std::vector<std::pair<int, int>> pair_indices_single;
-//     std::vector<std::pair<int, int>> pair_indices_multi;
-//
-//     cell_list_single.for_each_pair([&](const Atom &a1, const Atom &a2) {
-//       pairs_single++;
-//       pair_indices_single.emplace_back(a1.id(), a2.id());
-//     });
-//
-//     cell_list_multi.for_each_pair([&](const Atom &a1, const Atom &a2) {
-//       pairs_multi++;
-//       pair_indices_multi.emplace_back(a1.id(), a2.id());
-//     });
-//
-//     // Sort pair indices for comparison
-//     std::sort(pair_indices_single.begin(), pair_indices_single.end());
-//     std::sort(pair_indices_multi.begin(), pair_indices_multi.end());
-//
-//     // Verify results are identical
-//     REQUIRE(pairs_single == pairs_multi);
-//     REQUIRE(pair_indices_single == pair_indices_multi);
-//   }
-//
-//   // SECTION("Performance Test") {
-//   //   const int num_runs = 5;
-//   //   std::vector<double> single_thread_times;
-//   //   std::vector<double> multi_thread_times;
-//   //
-//   //   CellList cell_list_single(unit_cell, cutoff, 1);
-//   //   CellList cell_list_multi(unit_cell, cutoff, 4);
-//   //
-//   //   for (int i = 0; i < num_runs; ++i) {
-//   //     // Measure single-threaded performance
-//   //     auto start_single = std::chrono::high_resolution_clock::now();
-//   //     cell_list_single.update(atoms);
-//   //     auto end_single = std::chrono::high_resolution_clock::now();
-//   //     single_thread_times.push_back(
-//   //         std::chrono::duration<double>(end_single -
-//   start_single).count());
-//   //
-//   //     // Measure multi-threaded performance
-//   //     auto start_multi = std::chrono::high_resolution_clock::now();
-//   //     cell_list_multi.update(atoms);
-//   //     auto end_multi = std::chrono::high_resolution_clock::now();
-//   //     multi_thread_times.push_back(
-//   //         std::chrono::duration<double>(end_multi - start_multi).count());
-//   //   }
-//   //
-//   //   // Calculate average times
-//   //   double avg_single = std::accumulate(single_thread_times.begin(),
-//   //                                       single_thread_times.end(), 0.0) /
-//   //                       num_runs;
-//   //   double avg_multi = std::accumulate(multi_thread_times.begin(),
-//   //                                      multi_thread_times.end(), 0.0) /
-//   //                      num_runs;
-//   //
-//   //   // Verify multi-threaded version is faster
-//   //   INFO("Average single-threaded time: " << avg_single << " seconds");
-//   //   INFO("Average multi-threaded time: " << avg_multi << " seconds");
-//   //   INFO("Speedup factor: " << avg_single / avg_multi);
-//   //
-//   //   REQUIRE(avg_multi < avg_single);
-//   // }
-// }
+    REQUIRE(molecule.size() == 0);
+  }
+
+  SECTION("Single atom molecule") {
+    std::vector<Atom> atoms = {
+        Atom(Vec3{0.0, 0.0, 0.0}, Element("H", true), 0)};
+
+    Molecule molecule(atoms);
+
+    REQUIRE(molecule.size() == 1);
+  }
+
+  SECTION("Water molecule") {
+    std::vector<Atom> atoms = {
+        Atom(Vec3{0.0, 0.0, 0.0}, Element("O", true), 0),
+        Atom(Vec3{0.8, 0.0, 0.0}, Element("H", true), 1),
+        Atom(Vec3{-0.2, 0.8, 0.0}, Element("H", true), 2)};
+
+    Molecule molecule(atoms);
+
+    REQUIRE(molecule.size() == 3);
+  }
+}
+
+TEST_CASE("Molecule identification from atoms", "[molecule]") {
+  SECTION("Empty atom list") {
+    std::vector<Atom> atoms;
+    auto molecules = trajan::core::identify_molecules(atoms);
+
+    REQUIRE(molecules.empty());
+  }
+
+  SECTION("Single water molecule") {
+    std::vector<Atom> atoms = {
+        Atom(Vec3{0.0, 0.0, 0.0}, Element("O", true), 0),
+        Atom(Vec3{0.8, 0.0, 0.0}, Element("H", true), 1),
+        Atom(Vec3{-0.2, 0.8, 0.0}, Element("H", true), 2)};
+
+    auto molecules = trajan::core::identify_molecules(atoms);
+
+    REQUIRE(molecules.size() == 1);
+    REQUIRE(molecules[0].size() == 3);
+  }
+
+  SECTION("Two separate water molecules") {
+    std::vector<Atom> atoms = {
+        // First water molecule
+        Atom(Vec3{0.0, 0.0, 0.0}, Element("O", true), 0),
+        Atom(Vec3{0.8, 0.0, 0.0}, Element("H", true), 1),
+        Atom(Vec3{-0.2, 0.8, 0.0}, Element("H", true), 2),
+        // Second water molecule (far away)
+        Atom(Vec3{10.0, 10.0, 10.0}, Element("O", true), 4),
+        Atom(Vec3{10.8, 10.0, 10.0}, Element("H", true), 5),
+        Atom(Vec3{9.8, 10.8, 10.0}, Element("H", true), 6)};
+
+    auto molecules = trajan::core::identify_molecules(atoms);
+
+    REQUIRE(molecules.size() == 2);
+    REQUIRE(molecules[0].size() == 3);
+    REQUIRE(molecules[1].size() == 3);
+  }
+
+  SECTION("Three separate atoms that are not bonded") {
+    std::vector<Atom> atoms = {
+        Atom(Vec3{0.0, 0.0, 0.0}, Element("Na", true), 0),
+        Atom(Vec3{10.0, 0.0, 0.0}, Element("Cl", true), 1),
+        Atom(Vec3{0.0, 10.0, 0.0}, Element("Ar", true), 2)};
+
+    auto molecules = trajan::core::identify_molecules(atoms);
+
+    REQUIRE(molecules.size() == 3);
+    REQUIRE(molecules[0].size() == 1);
+    REQUIRE(molecules[1].size() == 1);
+    REQUIRE(molecules[2].size() == 1);
+  }
+
+  SECTION("Custom bond tolerance") {
+    std::vector<Atom> atoms = {
+        Atom(Vec3{0.0, 0.0, 0.0}, Element("C", true), 0),
+        Atom(Vec3{2.0, 0.0, 0.0}, Element("C", true), 1)
+        // Distance is larger than default tolerance
+    };
+
+    // With default tolerance, should be two separate molecules
+    auto molecules_default = trajan::core::identify_molecules(atoms);
+    REQUIRE(molecules_default.size() == 2);
+
+    // With increased tolerance, should be one molecule
+    auto molecules_increased = trajan::core::identify_molecules(atoms, 1.0);
+    REQUIRE(molecules_increased.size() == 1);
+    REQUIRE(molecules_increased[0].size() == 2);
+  }
+}
+
+TEST_CASE("MoleculeGraph bond detection", "[molecule][graph]") {
+  SECTION("Bonded atoms") {
+    // Typical C-O bond length
+    Atom a1(Vec3{0.0, 0.0, 0.0}, Element("C", true), 0);
+    Atom a2(Vec3{1.2, 0.0, 0.0}, Element("O", true), 1);
+
+    auto bond_opt = a1.is_bonded(a2);
+
+    REQUIRE(bond_opt.has_value());
+    REQUIRE(bond_opt->bond_length == Catch::Approx(1.2));
+  }
+
+  SECTION("Non-bonded atoms") {
+    // Too far for bonding
+    Atom a1(Vec3{0.0, 0.0, 0.0}, Element("C", true), 0);
+    Atom a2(Vec3{5.0, 0.0, 0.0}, Element("O", true), 1);
+
+    auto bond_opt = a1.is_bonded(a2);
+
+    REQUIRE_FALSE(bond_opt.has_value());
+  }
+
+  SECTION("Boundary case with tolerance") {
+    // Slightly longer than typical C-O bond
+    Atom a1(Vec3{0.0, 0.0, 0.0}, Element("C", true), 0);
+    Atom a2(Vec3{1.8, 0.0, 0.0}, Element("O", true), 1);
+
+    // With default tolerance
+    auto bond_default = a1.is_bonded(a2);
+    // With increased tolerance
+    auto bond_increased = a1.is_bonded(a2, 0.6);
+
+    REQUIRE_FALSE(bond_default.has_value());
+    REQUIRE(bond_increased.has_value());
+  }
+}
+
+TEST_CASE("Complex molecule identification", "[molecule][integration]") {
+  SECTION("Methane molecule") {
+    std::vector<Atom> atoms = {
+        Atom(Vec3{0.0, 0.0, 0.0}, Element("C", true), 0),
+        Atom(Vec3{0.8, 0.8, 0.8}, Element("H", true), 1),
+        Atom(Vec3{-0.8, -0.8, 0.8}, Element("H", true), 2),
+        Atom(Vec3{0.8, -0.8, -0.8}, Element("H", true), 3),
+        Atom(Vec3{-0.8, 0.8, -0.8}, Element("H", true), 4)};
+
+    auto molecules = trajan::core::identify_molecules(atoms, 0.8);
+
+    REQUIRE(molecules.size() == 1);
+    REQUIRE(molecules[0].size() == 5);
+  }
+
+  SECTION("Ethanol molecule") {
+    std::vector<Atom> atoms = {
+        // Carbon chain
+        Atom(Vec3{0.0, 0.0, 0.0}, Element("C", true), 0),
+        Atom(Vec3{1.5, 0.0, 0.0}, Element("C", true), 1),
+        // Hydrogens on first carbon
+        Atom(Vec3{-0.5, 0.9, 0.0}, Element("H", true), 2),
+        Atom(Vec3{-0.5, -0.5, 0.9}, Element("H", true), 3),
+        Atom(Vec3{-0.5, -0.5, -0.9}, Element("H", true), 4),
+        // Hydrogens on second carbon
+        Atom(Vec3{2.0, 0.9, 0.0}, Element("H", true), 5),
+        Atom(Vec3{2.0, -0.5, -0.9}, Element("H", true), 6),
+        // Oxygen and its hydrogen
+        Atom(Vec3{2.0, -0.5, 0.9}, Element("O", true), 7),
+        Atom(Vec3{3.0, -0.5, 0.9}, Element("H", true), 8)};
+
+    auto molecules = trajan::core::identify_molecules(atoms);
+
+    REQUIRE(molecules.size() == 1);
+    REQUIRE(molecules[0].size() == 9);
+  }
+
+  SECTION("Mixture of molecules") {
+    std::vector<Atom> atoms = {
+        // Water molecule
+        Atom(Vec3{0.0, 0.0, 0.0}, Element("O", true), 0),
+        Atom(Vec3{0.8, 0.0, 0.0}, Element("H", true), 1),
+        Atom(Vec3{-0.2, 0.8, 0.0}, Element("H", true), 2),
+        // CO2 molecule
+        Atom(Vec3{10.0, 10.0, 10.0}, Element("C", true), 3),
+        Atom(Vec3{11.2, 10.0, 10.0}, Element("O", true), 4),
+        Atom(Vec3{8.8, 10.0, 10.0}, Element("O", true), 5),
+        // Single atom
+        Atom(Vec3{20.0, 20.0, 20.0}, Element("Na", true), 6)};
+
+    auto molecules = trajan::core::identify_molecules(atoms);
+
+    REQUIRE(molecules.size() == 3);
+    // Check sizes of each molecule
+    bool found_water = false;
+    bool found_co2 = false;
+    bool found_sodium = false;
+
+    for (const auto &mol : molecules) {
+      if (mol.size() == 3) {
+        // Could be water or CO2
+        // In a real test, you'd need more checks to distinguish
+        if (!found_water) {
+          found_water = true;
+        } else {
+          found_co2 = true;
+        }
+      } else if (mol.size() == 1) {
+        found_sodium = true;
+      }
+    }
+
+    REQUIRE(found_water);
+    REQUIRE(found_co2);
+    REQUIRE(found_sodium);
+  }
+}

@@ -10,12 +10,25 @@ Molecule::Molecule(const std::vector<Atom> &atoms)
     const auto &atom = atoms[i];
     m_elements.push_back(atom.element);
     m_atomic_numbers(i) = atom.element.atomic_number();
-    // Internally store in angstroms
     m_positions(0, i) = atom.x;
     m_positions(1, i) = atom.y;
     m_positions(2, i) = atom.z;
   }
   m_name = chemical_formula(m_elements);
+}
+
+std::vector<Molecule> identify_molecules(const std::vector<Atom> &atoms,
+                                         double bond_tolerance) {
+  MoleculeGraph graph(atoms, bond_tolerance);
+  graph.build_graph();
+  auto components = graph.find_connected_components();
+
+  std::vector<Molecule> molecules;
+  for (const auto &component : components) {
+    std::vector<int> ids = component.get_node_ids();
+    molecules.emplace_back(component.get_node_types());
+  }
+  return molecules;
 }
 
 }; // namespace trajan::core

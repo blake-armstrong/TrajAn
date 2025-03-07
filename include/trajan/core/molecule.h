@@ -2,10 +2,12 @@
 #include <string>
 #include <trajan/core/atom.h>
 #include <trajan/core/element.h>
+#include <trajan/core/graph.h>
 #include <trajan/core/linear_algebra.h>
 #include <vector>
 
 namespace trajan::core {
+
 class Molecule {
 public:
   inline explicit Molecule() {};
@@ -35,4 +37,20 @@ private:
   Mat3N m_positions;
   Vec m_partial_charges;
 };
+
+class MoleculeGraph : public Graph<Atom, Bond> {
+public:
+  MoleculeGraph(const std::vector<Atom> &atoms, double bond_tolerance = 0.4)
+      : Graph<Atom, Bond>(atoms,
+                          [bond_tolerance](const Atom &a1, const Atom &a2) {
+                            return a1.is_bonded(a2, bond_tolerance);
+                          }) {};
+  NodeId get_node_id_from_node(const Atom &atom) const override {
+    return atom.id();
+  };
+};
+
+std::vector<Molecule> identify_molecules(const std::vector<Atom> &atoms,
+                                         double bond_tolerance = 0.4);
+
 }; // namespace trajan::core

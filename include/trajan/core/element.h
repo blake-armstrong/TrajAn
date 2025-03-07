@@ -125,11 +125,6 @@ static ElementData ELEMENTDATA_TABLE[ELEMENT_MAX + 1] = {
     {102, "nobelium", "No", 1.50f, 2.46f, 259.0f},
     {103, "lawrencium", "Lr", 1.50f, 2.00f, 262.0f}};
 
-// namespace element_utils {
-// const std::vector<std::string> extract_candidates(const std::string
-// &raw_input); const ElementData *match_element(const std::vector<std::string>
-// &candidates); } // namespace element_utils
-
 class Element {
 public:
   // Constructor not needed.

@@ -97,4 +97,17 @@ private:
     return std::make_pair(*start, *end);
   }
 };
+
+inline auto selection_validator =
+    [](std::optional<SelectionCriteria> &parsed_sel) {
+      return [parsed_sel = &parsed_sel](const std::string &input) {
+        auto result = SelectionParser::parse(input);
+        if (!result) {
+          return std::string("Invalid selection format");
+        }
+        *parsed_sel = result;
+        return std::string();
+      };
+    };
+
 } // namespace trajan::io

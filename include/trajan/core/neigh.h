@@ -187,11 +187,10 @@ private:
 
 enum class NeighbourListType { CELL_LIST, VERLET_LIST };
 
-class NeighbourListHandler {
+class NeighbourList {
 public:
-  NeighbourListHandler(const UnitCell &unit_cell, double cutoff,
-                       int num_threads,
-                       NeighbourListType type = NeighbourListType::CELL_LIST)
+  NeighbourList(const UnitCell &unit_cell, double cutoff, int num_threads,
+                NeighbourListType type = NeighbourListType::CELL_LIST)
       : m_unit_cell(unit_cell), m_cutoff(cutoff), m_num_threads(num_threads) {
     set_list_type(type);
   }

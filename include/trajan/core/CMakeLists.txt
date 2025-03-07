@@ -5,6 +5,7 @@ set(TRAJAN_CORE_INCLUDE_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/atom.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/element.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/molecule.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/graph.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/neigh.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/unit_cell.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/trajectory.h"
