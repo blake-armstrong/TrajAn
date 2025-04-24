@@ -2,9 +2,11 @@
 #include <memory>
 #include <trajan/core/log.h>
 #include <trajan/core/neigh.h>
+#include <trajan/core/util.h>
 #include <trajan/io/file.h>
 #include <trajan/io/selection.h>
 #include <trajan/main/trajan_rdf.h>
+#include <variant>
 
 namespace trajan::main {
 
@@ -12,27 +14,56 @@ namespace core = trajan::core;
 namespace io = trajan::io;
 using uFileHandler = std::unique_ptr<io::FileHandler>;
 
-void run_rdf_subcommand(RDFOpts const &opts) {
+void run_rdf_subcommand(const RDFOpts &opts) {
   std::vector<uFileHandler> handlers = io::read_input_files(opts.infiles);
-  core::Frame frame;
+  core::Trajectory trajectory;
+  core::Frame frame = trajectory.frame();
   for (uFileHandler &handler : handlers) {
-    while (handler->read_frame(frame)) {
-      core::UnitCell uc = frame.get_uc();
-      // TODO: make a way to estimate num_threads
-      // depending on this system size and num atoms
-      int num_threads = 1;
-      core::NeighbourList neigh_list(uc, opts.rcut, num_threads);
-      std::vector<core::Atom> atoms = frame.get_atoms();
-      Mat3N atom_pos = frame.get_atom_positions();
-      neigh_list.update(atoms, atom_pos);
-      size_t Nb = 0;
-      // for (core::Atom &atom : atoms) {
-      //   if (!atom)
-      // }
-      // get unit cell volume
-
-      // process_frame(frame);
+    bool read = handler->initialise();
+    if (!read) {
+      throw std::runtime_error(fmt::format(
+          "Unable to open file for reading: '{}'", handler->file_name()));
     }
+    trajan::log::debug(
+        fmt::format("Successfully opened file '{}'", handler->file_name()));
+
+    while (handler->read_frame(frame)) {
+      trajan::log::debug(fmt::format("uc: {}", frame.unit_cell().dummy()));
+      core::NeighbourList nl(frame.unit_cell(), opts.rcut, opts.num_threads);
+      io::SelectionCriteria sel1 = *opts.parsed_sel1;
+      core::Entities ents1 = trajectory.get_entities(sel1);
+      io::SelectionCriteria sel2 = *opts.parsed_sel2;
+      core::Entities ents2 = trajectory.get_entities(sel2);
+      size_t idx_cutoff = ents1.size();
+      core::Entities combined_ents =
+          trajan::util::combine_vectors<core::EntityType>({ents1, ents2});
+      core::NeighbourListPacket nlp =
+          trajectory.get_neighpack_from_entities(combined_ents);
+      nl.update(nlp);
+      std::vector<double> rdf_hist(opts.nbins, 0.0);
+      core::NeighbourCallback func = [&combined_ents, idx_cutoff, &rdf_hist](
+                                         const core::Entity &ent1,
+                                         const core::Entity &ent2, double rsq) {
+        bool is_cross_selection =
+            (ent1.idx < idx_cutoff && ent2.idx >= idx_cutoff) ||
+            (ent1.idx >= idx_cutoff && ent2.idx < idx_cutoff);
+        if (!is_cross_selection) {
+          return;
+        }
+        // const auto &sel1_ent = (ent1.idx < idx_cutoff)
+        //                            ? combined_ents[ent1.idx]
+        //                            : combined_ents[ent2.idx];
+        //
+        // const auto &sel2_ent = (ent1.idx >= idx_cutoff)
+        //                            ? combined_ents[ent1.idx]
+        //                            : combined_ents[ent2.idx];
+        // don't need std::visit for typing
+        // as it's inconsequential to rdf
+        double r = std::sqrt(rsq);
+        // TODO: do something lmao
+      };
+    }
+    handler->finalise();
   }
 }
 
@@ -63,6 +94,8 @@ CLI::App *add_rdf_subcommand(CLI::App &app) {
                   fmt::format("Second selection (same format as {})", sel1))
       ->required()
       ->check(io::selection_validator(opts->parsed_sel2));
+
+  opts->num_threads = app.get_option("--threads")->as<size_t>();
 
   rdf->callback([opts]() { run_rdf_subcommand(*opts); });
   return rdf;

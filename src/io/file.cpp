@@ -1,27 +1,69 @@
+#include "trajan/core/unit_cell.h"
 #include <algorithm>
 #include <memory>
 #include <stdexcept>
 #include <trajan/core/log.h>
+#include <trajan/io/dcd.h>
 #include <trajan/io/file.h>
+#include <trajan/io/pdb.h>
 #include <unordered_map>
 
 namespace trajan::io {
 
 namespace fs = std::filesystem;
-using FileType = FileHandler::FileType;
-using uFileHandler = std::unique_ptr<FileHandler>;
 
-void check_handlers(std::vector<uFileHandler> &handlers) {
+static const std::unordered_map<std::string, std::function<FileHandlerPtr()>>
+    handler_map = {{".pdb", []() { return std::make_unique<PDBHandler>(); }},
+                   {".dcd", []() { return std::make_unique<DCDHandler>(); }}};
+
+bool FileHandler::read_frame(core::Frame &frame) {
+  bool has_more_frames = this->read_next_frame(frame);
+  if (!has_more_frames) {
+    return false;
+  }
+  return this->validate_frame(frame);
+}
+
+bool FileHandler::validate_frame(core::Frame &frame) {
+  std::vector<core::Atom> atoms = frame.atoms();
+  if (atoms.empty()) {
+    throw std::runtime_error("No atoms found.");
+  }
+  core::UnitCell uc = frame.unit_cell();
+  Mat3N cart_pos = frame.cart_pos();
+  if (!uc.init()) {
+    // create dummy unit cell for neighlist
+    Vec3 min_vals = cart_pos.rowwise().minCoeff();
+    Vec3 max_vals = cart_pos.rowwise().maxCoeff();
+    Vec3 max_dims = max_vals - min_vals;
+    core::UnitCell dummy_uc =
+        core::dummy_cell(max_dims[0], max_dims[1], max_dims[2]);
+    frame.set_uc(dummy_uc);
+    Mat3N shifted_cart_pos = cart_pos.colwise() - min_vals;
+    Mat3N frac_pos = dummy_uc.to_fractional(shifted_cart_pos);
+    frame.set_frac_pos(frac_pos);
+    frame.set_wrapped_cart_pos(cart_pos);
+    return true;
+  }
+  Mat3N frac_pos = uc.to_fractional(cart_pos);
+  frac_pos = frac_pos.array() - frac_pos.array().floor();
+  frame.set_frac_pos(frac_pos);
+  Mat3N wrapped_cart_pos = uc.to_cartesian(frac_pos);
+  frame.set_wrapped_cart_pos(wrapped_cart_pos);
+  return true;
+}
+
+void check_handlers(std::vector<FileHandlerPtr> &handlers) {
   std::unordered_map<FileType, int> file_type_counts;
 
   for (const auto &handler : handlers) {
-    file_type_counts[handler->get_file_type()]++;
+    file_type_counts[handler->file_type()]++;
   }
   if (file_type_counts.count(FileType::PDB) > 1) {
     trajan::log::warn("Multiple PDB files read. Using last.");
     auto it = std::find_if(handlers.begin(), handlers.end(),
-                           [](const uFileHandler &handler) {
-                             return handler->get_file_type() == FileType::PDB;
+                           [](const FileHandlerPtr &handler) {
+                             return handler->file_type() == FileType::PDB;
                            });
     if (it != handlers.end()) {
       handlers.erase(it);
@@ -38,10 +80,10 @@ void check_handlers(std::vector<uFileHandler> &handlers) {
   }
 };
 
-uFileHandler get_handler(std::string ext) {
+FileHandlerPtr get_handler(std::string ext) {
   auto it = handler_map.find(ext);
   if (it != handler_map.end()) {
-    std::unique_ptr<io::FileHandler> handler = it->second();
+    FileHandlerPtr handler = it->second();
     trajan::log::debug(fmt::format("Recognised '{}' file extension", ext));
     return handler;
   } else {
@@ -49,7 +91,7 @@ uFileHandler get_handler(std::string ext) {
   }
 };
 
-uFileHandler read_input_file(const fs::path &file) {
+FileHandlerPtr read_input_file(const fs::path &file) {
   std::string ext = file.extension().string();
   trajan::log::debug("Attempting to read input from {}, file extension = {}",
                      file.generic_string(), ext);
@@ -58,14 +100,15 @@ uFileHandler read_input_file(const fs::path &file) {
         fmt::format("Input file does not exist: '{}'", file.generic_string()));
   };
 
-  uFileHandler handler = get_handler(ext);
+  FileHandlerPtr handler = get_handler(ext);
   handler->set_file_path(file);
 
   return handler;
 }
 
-std::vector<uFileHandler> read_input_files(const std::vector<fs::path> &files) {
-  std::vector<uFileHandler> handlers;
+std::vector<FileHandlerPtr>
+read_input_files(const std::vector<fs::path> &files) {
+  std::vector<FileHandlerPtr> handlers;
   for (const fs::path &file : files) {
     handlers.push_back(read_input_file(file));
   }

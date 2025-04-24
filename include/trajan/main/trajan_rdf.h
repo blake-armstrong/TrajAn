@@ -4,17 +4,13 @@
 #include <string>
 #include <trajan/io/file.h>
 #include <trajan/io/selection.h>
-#include <vector>
 
 namespace trajan::main {
 
-// namespace core = trajan::core;
 namespace io = trajan::io;
-namespace fs = std::filesystem;
 
-struct RDFOpts {
-  std::vector<fs::path> infiles;
-  std::string outfile = "gofr.out";
+struct RDFOpts : trajan::util::Opts {
+  std::string outfile{"gofr.out"};
   double rcut = 6.0;
   int nbins = 100;
   std::string raw_sel1, raw_sel2;

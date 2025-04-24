@@ -14,8 +14,8 @@ TEST_CASE("Selection Parser - Index Selection", "[selection][index]") {
 
     const auto *selection = std::get_if<IndexSelection>(&*result);
     REQUIRE(selection != nullptr);
-    REQUIRE(selection->indices.size() == 1);
-    CHECK(selection->indices[0] == 1);
+    REQUIRE(selection->data.size() == 1);
+    CHECK(selection->data[0] == 1);
   }
 
   SECTION("Multiple indices") {
@@ -24,8 +24,8 @@ TEST_CASE("Selection Parser - Index Selection", "[selection][index]") {
 
     const auto *selection = std::get_if<IndexSelection>(&*result);
     REQUIRE(selection != nullptr);
-    REQUIRE(selection->indices.size() == 3);
-    CHECK(selection->indices == std::vector{1, 2, 3});
+    REQUIRE(selection->data.size() == 3);
+    CHECK(selection->data == std::vector{1, 2, 3});
   }
 
   SECTION("Index range") {
@@ -34,8 +34,8 @@ TEST_CASE("Selection Parser - Index Selection", "[selection][index]") {
 
     const auto *selection = std::get_if<IndexSelection>(&*result);
     REQUIRE(selection != nullptr);
-    REQUIRE(selection->indices.size() == 3);
-    CHECK(selection->indices == std::vector{1, 2, 3});
+    REQUIRE(selection->data.size() == 3);
+    CHECK(selection->data == std::vector{1, 2, 3});
   }
 
   SECTION("Mixed indices and ranges") {
@@ -44,8 +44,8 @@ TEST_CASE("Selection Parser - Index Selection", "[selection][index]") {
 
     const auto *selection = std::get_if<IndexSelection>(&*result);
     REQUIRE(selection != nullptr);
-    REQUIRE(selection->indices.size() == 5);
-    CHECK(selection->indices == std::vector{1, 2, 3, 4, 6});
+    REQUIRE(selection->data.size() == 5);
+    CHECK(selection->data == std::vector{1, 2, 3, 4, 6});
   }
 }
 
@@ -56,8 +56,8 @@ TEST_CASE("Selection Parser - Atom Type Selection", "[selection][atom]") {
 
     const auto *selection = std::get_if<AtomTypeSelection>(&*result);
     REQUIRE(selection != nullptr);
-    REQUIRE(selection->types.size() == 1);
-    CHECK(selection->types[0] == "C");
+    REQUIRE(selection->data.size() == 1);
+    CHECK(selection->data[0] == "C");
   }
 
   SECTION("Multiple atom types") {
@@ -66,8 +66,8 @@ TEST_CASE("Selection Parser - Atom Type Selection", "[selection][atom]") {
 
     const auto *selection = std::get_if<AtomTypeSelection>(&*result);
     REQUIRE(selection != nullptr);
-    REQUIRE(selection->types.size() == 3);
-    CHECK(selection->types == std::vector<std::string>{"C", "N", "O"});
+    REQUIRE(selection->data.size() == 3);
+    CHECK(selection->data == std::vector<std::string>{"C", "N", "O"});
   }
 
   SECTION("Atom types with underscores") {
@@ -76,8 +76,8 @@ TEST_CASE("Selection Parser - Atom Type Selection", "[selection][atom]") {
 
     const auto *selection = std::get_if<AtomTypeSelection>(&*result);
     REQUIRE(selection != nullptr);
-    REQUIRE(selection->types.size() == 2);
-    CHECK(selection->types == std::vector<std::string>{"CA_1", "CB_2"});
+    REQUIRE(selection->data.size() == 2);
+    CHECK(selection->data == std::vector<std::string>{"CA_1", "CB_2"});
   }
 }
 
@@ -88,8 +88,8 @@ TEST_CASE("Selection Parser - Molecule Selection", "[selection][molecule]") {
 
     const auto *selection = std::get_if<MoleculeSelection>(&*result);
     REQUIRE(selection != nullptr);
-    REQUIRE(selection->molecule_ids.size() == 1);
-    CHECK(selection->molecule_ids[0] == 1);
+    REQUIRE(selection->data.size() == 1);
+    CHECK(selection->data[0] == 1);
   }
 
   SECTION("Molecule range") {
@@ -98,8 +98,8 @@ TEST_CASE("Selection Parser - Molecule Selection", "[selection][molecule]") {
 
     const auto *selection = std::get_if<MoleculeSelection>(&*result);
     REQUIRE(selection != nullptr);
-    REQUIRE(selection->molecule_ids.size() == 3);
-    CHECK(selection->molecule_ids == std::vector{1, 2, 3});
+    REQUIRE(selection->data.size() == 3);
+    CHECK(selection->data == std::vector{1, 2, 3});
   }
 }
 
@@ -126,8 +126,8 @@ TEST_CASE("Selection Parser - Edge Cases", "[selection][edge]") {
 
     const auto *selection = std::get_if<IndexSelection>(&*result);
     REQUIRE(selection != nullptr);
-    REQUIRE(selection->indices.size() == 3);
-    CHECK(selection->indices == std::vector{1, 2, 3});
+    REQUIRE(selection->data.size() == 3);
+    CHECK(selection->data == std::vector{1, 2, 3});
   }
 
   SECTION("Duplicate values are removed") {
@@ -136,8 +136,8 @@ TEST_CASE("Selection Parser - Edge Cases", "[selection][edge]") {
 
     const auto *selection = std::get_if<IndexSelection>(&*result);
     REQUIRE(selection != nullptr);
-    REQUIRE(selection->indices.size() == 3);
-    CHECK(selection->indices == std::vector{1, 2, 3});
+    REQUIRE(selection->data.size() == 3);
+    CHECK(selection->data == std::vector{1, 2, 3});
   }
 
   SECTION("Complex mixed cases") {
@@ -161,11 +161,11 @@ TEST_CASE("Selection Parser - Edge Cases", "[selection][edge]") {
         [&test_case](const auto &selection) {
           using T = std::decay_t<decltype(selection)>;
           if constexpr (std::is_same_v<T, IndexSelection>) {
-            CHECK(selection.indices.size() == test_case.expected_size);
+            CHECK(selection.data.size() == test_case.expected_size);
           } else if constexpr (std::is_same_v<T, AtomTypeSelection>) {
-            CHECK(selection.types.size() == test_case.expected_size);
+            CHECK(selection.data.size() == test_case.expected_size);
           } else if constexpr (std::is_same_v<T, MoleculeSelection>) {
-            CHECK(selection.molecule_ids.size() == test_case.expected_size);
+            CHECK(selection.data.size() == test_case.expected_size);
           }
         },
         *result);

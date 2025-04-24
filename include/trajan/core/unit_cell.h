@@ -4,6 +4,8 @@
 #include <trajan/core/util.h>
 
 namespace trajan::core {
+
+static constexpr double NINETY_DEG = trajan::units::PI / 2;
 using util::is_close;
 
 class UnitCell {
@@ -46,7 +48,6 @@ public:
    * No checking is performed.
    */
   void set_a(double a);
-
   /**
    * Set the length of the b-axis.
    *
@@ -149,7 +150,9 @@ public:
    * \returns Mat3N of fractional coordinates
    */
   inline auto to_fractional(const Mat3N &coords) const {
-    return m_inverse * coords;
+    Mat3N frac_pos = m_inverse * coords;
+    frac_pos = frac_pos.array() - frac_pos.array().floor();
+    return frac_pos;
   }
 
   /**
@@ -179,6 +182,12 @@ public:
   /// the \f$\bf{c}\f$ lattice vector
   inline auto c_vector() const { return m_direct.col(2); }
 
+  inline const bool &dummy() const { return m_dummy; }
+
+  inline const bool &init() const { return m_init; }
+
+  inline void set_dummy() { m_dummy = true; }
+
 private:
   Vec3 m_lengths;
   Vec3 m_angles;
@@ -188,6 +197,8 @@ private:
   Mat3 m_direct;
   Mat3 m_inverse;
   Mat3 m_reciprocal;
+  bool m_dummy{false};
+  bool m_init{false};
 
   void update_cell_matrices();
 
@@ -238,4 +249,6 @@ UnitCell monoclinic_cell(double a, double b, double c, double angle);
 /// angles
 UnitCell triclinic_cell(double a, double b, double c, double alpha, double beta,
                         double gamma);
+/// Construct a dummy cell for non-periodic simulations
+UnitCell dummy_cell(double a, double b, double c);
 }; // namespace trajan::core

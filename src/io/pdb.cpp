@@ -5,29 +5,37 @@
 #include <trajan/core/element.h>
 #include <trajan/core/frame.h>
 #include <trajan/core/log.h>
-#include <trajan/io/file.h>
+#include <trajan/core/unit_cell.h>
+#include <trajan/io/pdb.h>
 
 namespace trajan::io {
 
 namespace core = trajan::core;
 
-bool PDBHandler::read_frame(core::Frame &frame) {
-  std::ifstream file(get_file_path());
-  if (!file.is_open()) {
-    throw std::runtime_error(
-        fmt::format("Unable to open file for reading: '{}'", get_file_name()));
+bool PDBHandler::initialise() {
+  m_file.open(this->file_path());
+  return m_file.is_open();
+}
+
+void PDBHandler::finalise() {
+  if (m_file.is_open()) {
+    m_file.close();
   }
-  trajan::log::debug(
-      fmt::format("Successfully opened file '{}'", get_file_name()));
+}
+
+bool PDBHandler::parse_pdb(core::Frame &frame) {
+
   std::vector<core::Atom> atoms;
   std::string line;
-  while (std::getline(file, line)) {
+  while (std::getline(m_file, line)) {
     if (line.substr(0, 6) == "CRYST1") {
+      trajan::log::debug("Found unit cell from CRYST1 line in PDB.");
       double a, b, c, alpha, beta, gamma;
       char record_name[7], sg[12], z[5];
       int result = std::sscanf(line.c_str(), PDB_CRYST_FMT.data(), record_name,
                                &a, &b, &c, &alpha, &beta, &gamma, sg, z);
-      core::UnitCell uc(a, b, c, alpha, beta, gamma);
+      core::UnitCell uc = core::triclinic_cell(a, b, c, alpha, beta, gamma);
+      trajan::log::debug(fmt::format("uc: {}", uc.dummy()));
       frame.set_uc(uc);
       continue;
     }
@@ -60,11 +68,22 @@ bool PDBHandler::read_frame(core::Frame &frame) {
       exact = false;
       element_identifier = name_buffer;
     }
-    atom.element = core::Element(element_identifier, exact);
+    atom.element = core::element::Element(element_identifier, exact);
     atoms.push_back(atom);
   }
   frame.set_atoms(atoms);
-  return false;
+  return true;
+}
+
+bool PDBHandler::read_next_frame(core::Frame &frame) {
+  if (m_has_read) {
+    return false;
+  }
+  bool success = this->parse_pdb(frame);
+
+  m_has_read = true;
+
+  return success;
 }
 
 // void PDBHandler::write_trajectory(const std::string &filename,

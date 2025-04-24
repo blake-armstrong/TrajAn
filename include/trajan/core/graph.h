@@ -1,89 +1,70 @@
 #pragma once
-#include <functional>
+#include <ankerl/unordered_dense.h>
 #include <queue>
-#include <stdexcept>
-#include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
-namespace trajan::core {
+namespace trajan::core::graph {
 
 template <typename NodeType, typename EdgeType> class ConnectedComponent;
 
 template <typename NodeType, typename EdgeType> class Graph {
 public:
-  using NodeId = int;
-  using EdgePredicate = std::function<std::optional<EdgeType>(
-      const NodeType &, const NodeType &)>;
+  using NodeID = size_t;
+  using ConnectedComponent = ConnectedComponent<NodeType, EdgeType>;
+  using AdjacencyList = ankerl::unordered_dense::map<
+      NodeID, ankerl::unordered_dense::map<NodeID, EdgeType>>;
 
-  Graph(const std::vector<NodeType> &nodes, EdgePredicate edge_predicate)
-      : m_nodes(nodes), m_edge_predicate(edge_predicate) {}
+  Graph() = default;
+  Graph(const std::vector<NodeType> &nodes) : m_nodes(nodes) {}
 
-  void build_graph() {
-    for (size_t i = 0; i < m_nodes.size(); i++) {
-      NodeId id1 = get_node_id(i);
-
-      for (size_t j = i + 1; j < m_nodes.size(); j++) {
-        NodeId id2 = get_node_id(j);
-        std::optional<EdgeType> edge_data =
-            m_edge_predicate(m_nodes[i], m_nodes[j]);
-        if (!edge_data) {
-          continue;
-        }
-        m_adjacency_list[id1][id2] = *edge_data;
-        m_adjacency_list[id2][id1] = *edge_data;
-      }
+  std::vector<ConnectedComponent> find_connected_components() {
+    if (m_adjacency_list.empty()) {
+      throw std::runtime_error("Build graph.");
     }
-    m_init = true;
-  }
-
-  std::vector<ConnectedComponent<NodeType, EdgeType>>
-  find_connected_components() const {
-    if (!m_init) {
-      throw std::runtime_error("Graph not built. Call build_graph().");
-    }
-
-    std::vector<ConnectedComponent<NodeType, EdgeType>> components;
-    std::unordered_set<NodeId> visited;
+    m_components.clear();
+    m_components.reserve(m_nodes.size());
+    ankerl::unordered_dense::set<NodeID> visited;
 
     for (size_t i = 0; i < m_nodes.size(); i++) {
-      NodeId node_id = get_node_id(i);
+      NodeID node_id = get_node_id(i);
 
-      if (visited.find(node_id) != visited.end()) {
+      if (visited.contains(node_id)) {
         continue;
       }
 
-      ConnectedComponent<NodeType, EdgeType> component;
+      ConnectedComponent component;
 
-      std::queue<NodeId> queue;
+      std::queue<NodeID> queue;
       queue.push(node_id);
       visited.insert(node_id);
 
       while (!queue.empty()) {
-        NodeId current_id = queue.front();
+        NodeID current_id = queue.front();
         queue.pop();
         component.add_node(current_id, get_node_by_id(current_id));
 
-        if (m_adjacency_list.find(current_id) != m_adjacency_list.end()) {
-          for (const auto &[neighbor_id, edge_data] :
-               m_adjacency_list.at(current_id)) {
-            component.add_edge(current_id, neighbor_id, edge_data);
+        if (!m_adjacency_list.contains(current_id)) {
+          continue;
+        }
+        for (const auto &[neighbour_id, edge_data] :
+             m_adjacency_list.at(current_id)) {
+          component.add_edge(current_id, neighbour_id, edge_data);
 
-            if (visited.find(neighbor_id) == visited.end()) {
-              queue.push(neighbor_id);
-              visited.insert(neighbor_id);
-            }
+          if (visited.contains(neighbour_id)) {
+            continue;
           }
+          queue.push(neighbour_id);
+          visited.insert(neighbour_id);
         }
       }
 
-      components.push_back(component);
+      m_components.push_back(component);
     }
 
-    return components;
+    return m_components;
   }
 
-  const NodeType &get_node_by_id(NodeId id) const {
+  const NodeType &get_node_by_id(NodeID id) const {
     for (const auto &node : m_nodes) {
       if (get_node_id_from_node(node) == id) {
         return node;
@@ -92,72 +73,66 @@ public:
     throw std::runtime_error("Node ID not found");
   }
 
-  const std::unordered_map<NodeId, std::unordered_map<NodeId, EdgeType>> &
-  get_adjacency_list() const {
-    return m_adjacency_list;
-  }
+  const AdjacencyList &get_adjacency_list() const { return m_adjacency_list; }
 
-  virtual NodeId get_node_id_from_node(const NodeType &node) const = 0;
+  virtual NodeID get_node_id_from_node(const NodeType &node) const = 0;
+
+  void add_edge(NodeID idx1, NodeID idx2, EdgeType &edge) {
+    m_adjacency_list[idx1][idx2] = edge;
+  }
 
 protected:
   std::vector<NodeType> m_nodes;
-  EdgePredicate m_edge_predicate;
-  std::unordered_map<NodeId, std::unordered_map<NodeId, EdgeType>>
-      m_adjacency_list;
-  bool m_init = false;
+  AdjacencyList m_adjacency_list;
+  std::vector<ConnectedComponent> m_components;
 
-  NodeId get_node_id(size_t index) const {
+  NodeID get_node_id(size_t index) const {
     return get_node_id_from_node(m_nodes[index]);
+  }
+};
+
+struct PairHash {
+  template <class T1, class T2>
+  size_t operator()(const std::pair<T1, T2> &p) const {
+    auto h1 = std::hash<T1>{}(p.first);
+    auto h2 = std::hash<T2>{}(p.second);
+    return h1 ^ (h2 << 1);
   }
 };
 
 template <typename NodeType, typename EdgeType> class ConnectedComponent {
 public:
-  using NodeId = typename Graph<NodeType, EdgeType>::NodeId;
+  using NodeID = typename Graph<NodeType, EdgeType>::NodeID;
+  using Nodes = ankerl::unordered_dense::map<NodeID, NodeType>;
+  using Edges = ankerl::unordered_dense::map<std::pair<NodeID, NodeID>,
+                                             EdgeType, PairHash>;
 
-  void add_node(NodeId id, const NodeType &node) { m_nodes[id] = node; }
-
-  void add_edge(NodeId from, NodeId to, const EdgeType &edge_data) {
+  inline void add_node(NodeID id, const NodeType &node) { m_nodes[id] = node; }
+  inline void add_edge(NodeID from, NodeID to, const EdgeType &edge_data) {
     m_edges[{from, to}] = edge_data;
   }
+  inline const Nodes &get_nodes() const { return m_nodes; }
+  inline const Edges &get_edges() const { return m_edges; }
 
-  const std::unordered_map<NodeId, NodeType> &get_nodes() const {
-    return m_nodes;
-  }
-
-  struct PairHash {
-    template <class T1, class T2>
-    std::size_t operator()(const std::pair<T1, T2> &p) const {
-      auto h1 = std::hash<T1>{}(p.first);
-      auto h2 = std::hash<T2>{}(p.second);
-      return h1 ^ (h2 << 1);
-    }
-  };
-
-  const std::unordered_map<std::pair<NodeId, NodeId>, EdgeType, PairHash> &
-  get_edges() const {
-    return m_edges;
-  }
-
-  std::vector<NodeId> get_node_ids() const {
-    std::vector<NodeId> ids;
-    for (const auto &[id, _] : m_nodes) {
-      ids.push_back(id);
-    }
-    return ids;
-  }
-
-  std::vector<NodeType> get_node_types() const {
-    std::vector<NodeType> types;
-    for (const auto &[_, type] : m_nodes) {
-      types.push_back(type);
-    }
-    return types;
-  }
+  // inline std::vector<NodeID> get_node_ids() const {
+  //   std::vector<NodeID> ids;
+  //   for (const auto &[id, _] : m_nodes) {
+  //     ids.push_back(id);
+  //   }
+  //   return ids;
+  // }
+  //
+  // inline std::vector<NodeType> get_node_types() const {
+  //   std::vector<NodeType> types;
+  //   for (const auto &[_, type] : m_nodes) {
+  //     types.push_back(type);
+  //   }
+  //   return types;
+  // }
 
 private:
-  std::unordered_map<NodeId, NodeType> m_nodes;
-  std::unordered_map<std::pair<NodeId, NodeId>, EdgeType, PairHash> m_edges;
+  Nodes m_nodes;
+  Edges m_edges;
 };
 
-}; // namespace trajan::core
+}; // namespace trajan::core::graph

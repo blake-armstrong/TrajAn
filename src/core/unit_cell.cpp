@@ -6,19 +6,22 @@ namespace trajan::core {
 
 UnitCell::UnitCell() {
   m_lengths = Vec3{1, 1, 1};
-  m_angles =
-      Vec3{trajan::units::PI / 2, trajan::units::PI / 2, trajan::units::PI / 2};
+  m_angles = Vec3{NINETY_DEG, NINETY_DEG, NINETY_DEG};
+  m_dummy = true;
+  m_init = false;
 }
 
 UnitCell::UnitCell(double a, double b, double c, double alpha, double beta,
                    double gamma) {
   m_lengths = Vec3{a, b, c};
   m_angles = Vec3{alpha, beta, gamma};
+  m_init = true;
   update_cell_matrices();
 }
 UnitCell::UnitCell(const Vec3 &lengths, const Vec3 &angles) {
   m_lengths = lengths;
   m_angles = angles;
+  m_init = true;
   update_cell_matrices();
 }
 UnitCell::UnitCell(const Mat3 &vectors) {
@@ -29,6 +32,7 @@ UnitCell::UnitCell(const Mat3 &vectors) {
   m_angles(0) = std::acos(std::clamp(u_b.dot(u_c), -1.0, 1.0));
   m_angles(1) = std::acos(std::clamp(u_c.dot(u_a), -1.0, 1.0));
   m_angles(2) = std::acos(std::clamp(u_a.dot(u_b), -1.0, 1.0));
+  m_init = true;
   update_cell_matrices();
 }
 
@@ -107,8 +111,12 @@ std::string UnitCell::cell_type() const {
     return "hexagonal";
   if (is_tetragonal())
     return "tetragonal";
-  if (is_orthorhombic())
+  if (is_orthorhombic()) {
+    if (dummy()) {
+      return "dummy";
+    }
     return "orthorhombic";
+  }
   if (is_monoclinic())
     return "monoclinic";
   return "triclinic";
@@ -119,8 +127,7 @@ std::string UnitCell::cell_type() const {
  */
 
 UnitCell cubic_cell(double length) {
-  return UnitCell(length, length, length, trajan::units::PI / 2,
-                  trajan::units::PI / 2, trajan::units::PI / 2);
+  return UnitCell(length, length, length, NINETY_DEG, NINETY_DEG, NINETY_DEG);
 }
 
 UnitCell rhombohedral_cell(double length, double angle) {
@@ -128,28 +135,31 @@ UnitCell rhombohedral_cell(double length, double angle) {
 }
 
 UnitCell tetragonal_cell(double a, double c) {
-  return UnitCell(a, a, c, trajan::units::PI / 2, trajan::units::PI / 2,
-                  trajan::units::PI / 2);
+  return UnitCell(a, a, c, NINETY_DEG, NINETY_DEG, NINETY_DEG);
 }
 
 UnitCell hexagonal_cell(double a, double c) {
-  return UnitCell(a, a, c, trajan::units::PI / 2, trajan::units::PI / 2,
-                  2 * trajan::units::PI / 3);
+  return UnitCell(a, a, c, NINETY_DEG, NINETY_DEG, 2 * trajan::units::PI / 3);
 }
 
 UnitCell orthorhombic_cell(double a, double b, double c) {
-  return UnitCell(a, b, c, trajan::units::PI / 2, trajan::units::PI / 2,
-                  trajan::units::PI / 2);
+  return UnitCell(a, b, c, NINETY_DEG, NINETY_DEG, NINETY_DEG);
 }
 
 UnitCell monoclinic_cell(double a, double b, double c, double angle) {
 
-  return UnitCell(a, b, c, trajan::units::PI / 2, angle, trajan::units::PI / 2);
+  return UnitCell(a, b, c, NINETY_DEG, angle, NINETY_DEG);
 }
 
 UnitCell triclinic_cell(double a, double b, double c, double alpha, double beta,
                         double gamma) {
   return UnitCell(a, b, c, alpha, beta, gamma);
+}
+
+UnitCell dummy_cell(double a, double b, double c) {
+  UnitCell uc = orthorhombic_cell(a, b, c);
+  uc.set_dummy();
+  return uc;
 }
 
 } // namespace trajan::core

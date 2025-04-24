@@ -8,49 +8,61 @@
 
 namespace trajan::core {
 
+class BondGraph : public graph::Graph<Atom, Bond> {
+public:
+  BondGraph() = default;
+  BondGraph(const std::vector<Atom> &atoms) : Graph<Atom, Bond>(atoms) {};
+
+private:
+  NodeID get_node_id_from_node(const Atom &atom) const override {
+    return atom.index;
+  };
+};
+
 class Molecule {
 public:
-  inline explicit Molecule() {};
+  double x, y, z;
+  std::string type;
+  int index;
 
-  /**
-   * Construct a Molecule from a vector of Atom objects
-   *
-   * \param atoms std::vector<Atom> of length N atoms.
-   *
-   **/
+  enum Origin {
+    Cartesian,   /**< The Cartesian origin i.e. (0, 0, 0) in R3 */
+    Centroid,    /**< The molecular centroid i.e. average position of atoms
+                    (ignoring mass) */
+    CentreOfMass /**< The centre of mass i.e. the weighted average positon */
+  };
+
+  inline explicit Molecule() {};
   Molecule(const std::vector<Atom> &atoms);
-  /**
-   * The number of atoms in this molecule.
-   *
-   * \returns size size_t representing the number of atoms in this Molecule.
-   *
-   * Calculated based on the internal IVec of atomic numbers.
-   */
+  Molecule(const graph::ConnectedComponent<Atom, Bond> &cc);
+  Molecule(const Molecule &other, Vec3 shift)
+      : x(other.x + shift.x()), y(other.y + shift.y()), z(other.z + shift.z()) {
+  }
+
+  inline Vec3 position() const { return {x, y, z}; }
+
+  Vec atomic_masses() const;
+
+  Vec3 centroid() const;
+
+  Vec3 centre_of_mass() const;
+
+  inline double square_distance(const Molecule &other) const {
+    double dx = other.x - x, dy = other.y - y, dz = other.z - z;
+    return dx * dx + dy * dy + dz * dz;
+  }
+
   inline size_t size() const { return m_atomic_numbers.size(); }
 
 private:
-  std::vector<Atom> m_atoms;
+  int charge = 0;
   std::string m_name{""};
-  std::vector<std::pair<size_t, size_t>> m_bonds;
-  std::vector<Element> m_elements;
+  std::vector<Atom> m_atoms;
+  std::vector<Bond> m_bonds;
+  std::vector<element::Element> m_elements;
   IVec m_atomic_numbers;
   Mat3N m_positions;
   Vec m_partial_charges;
 };
-
-class MoleculeGraph : public Graph<Atom, Bond> {
-public:
-  MoleculeGraph(const std::vector<Atom> &atoms, double bond_tolerance = 0.4)
-      : Graph<Atom, Bond>(atoms,
-                          [bond_tolerance](const Atom &a1, const Atom &a2) {
-                            return a1.is_bonded(a2, bond_tolerance);
-                          }) {};
-  NodeId get_node_id_from_node(const Atom &atom) const override {
-    return atom.id();
-  };
-};
-
-std::vector<Molecule> identify_molecules(const std::vector<Atom> &atoms,
-                                         double bond_tolerance = 0.4);
 
 }; // namespace trajan::core

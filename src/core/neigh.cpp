@@ -1,41 +1,54 @@
 #include <omp.h>
 #include <stdexcept>
+#include <trajan/core/frame.h>
+#include <trajan/core/log.h>
 #include <trajan/core/neigh.h>
+
 namespace trajan::core {
 
-void Cell::add_atom(const Atom &atom) { m_atoms.push_back(atom); }
+NeighbourListBase::NeighbourListBase(const UnitCell &unit_cell, double rcut,
+                                     size_t num_threads)
+    : m_unit_cell(unit_cell), m_cutoff(rcut), m_cutoffsq(rcut * rcut),
+      m_num_threads(num_threads) {}
 
-CellList::CellList(const UnitCell &unit_cell, double cutoff, int num_threads)
-    : m_unit_cell(unit_cell), m_cutoff(cutoff), m_cutoffsq(cutoff * cutoff),
-      m_num_threads(num_threads),
-      m_params(generate_cell_params(unit_cell, cutoff, NUMGHOSTS)) {
+CellList::CellList(const UnitCell &unit_cell, double cutoff, size_t num_threads)
+    : NeighbourListBase(unit_cell, cutoff, num_threads) {
   if (m_num_threads > 0) {
-    omp_set_num_threads(m_num_threads);
+    size_t opt_nt = determine_opt_num_threads();
+    omp_set_num_threads(opt_nt);
   }
   {
 #pragma omp critical
-    initialise_cells();
+    if (m_unit_cell.dummy()) {
+      trajan::log::debug(
+          "Using a dummy unit cell. This should only be the case "
+          "if no crystallographic information was input.");
+      this->initialise_cells(0);
+      return;
+    }
+    this->initialise_cells();
   }
 }
 
-const CellListParameters
-CellList::generate_cell_params(const UnitCell &unit_cell, double cutoff,
-                               const size_t num_ghosts) const {
+CellListParameters CellList::generate_cell_params(size_t ghost_cells) const {
   return CellListParameters(
       static_cast<int>(
-          std::floor(unit_cell.a_vector().norm() / (cutoff / num_ghosts))),
+          std::floor(m_unit_cell.a_vector().norm() / (m_cutoff / CELLDIVISOR))),
       static_cast<int>(
-          std::floor(unit_cell.b_vector().norm() / (cutoff / num_ghosts))),
+          std::floor(m_unit_cell.b_vector().norm() / (m_cutoff / CELLDIVISOR))),
       static_cast<int>(
-          std::floor(unit_cell.c_vector().norm() / (cutoff / num_ghosts))),
-      num_ghosts);
+          std::floor(m_unit_cell.c_vector().norm() / (m_cutoff / CELLDIVISOR))),
+      ghost_cells);
 }
 
-size_t CellList::linear_index(size_t a, size_t b, size_t c) const {
-  return (a * m_params.total_b * m_params.total_c) + (b * m_params.total_c) + c;
+size_t CellList::determine_opt_num_threads() {
+  // FIXME:
+  return 1;
 }
 
-void CellList::initialise_cells() {
+void CellList::initialise_cells(size_t ghost_cells) {
+  m_params = generate_cell_params(ghost_cells);
+
   m_cells.resize(m_params.total);
   for (size_t i = 0; i < m_params.total; i++) {
     const size_t a = i / (m_params.total_b * m_params.total_c);
@@ -74,32 +87,38 @@ void CellList::initialise_cells() {
 }
 
 void CellList::clear_cells() {
-#pragma omp parallel for
+  // #pragma omp parallel for
   for (Cell &cell : m_cells) {
     cell.clear();
   }
 }
-void CellList::update(const std::span<Atom> atoms, const Mat3N atoms_pos) {
-  if (atoms.size() != atoms_pos.cols()) {
-    std::runtime_error("Number of atoms and their positions not the same.");
+void CellList::update(const NeighbourListPacket &nlp) {
+  if (m_dummy) {
+    if (!m_unit_cell.dummy()) {
+      throw std::runtime_error("Inconsistency in dummy UC.");
+    }
+    this->initialise_cells(0);
   }
-  clear_cells();
-  Mat3N frac_pos = m_unit_cell.to_fractional(atoms_pos);
-  frac_pos = frac_pos.array() - frac_pos.array().floor();
+  // if (atoms.size() != cart_pos.cols()) {
+  //   std::runtime_error("Number of atoms and their positions not the same.");
+  // }
+  this->clear_cells();
+  // Mat3N frac_pos = m_unit_cell.to_fractional(cart_pos);
+  // frac_pos = frac_pos.array() - frac_pos.array().floor();
+  Mat3N frac_pos = nlp.wrapped_frac_pos;
   IVec inds_a = (frac_pos.row(0) * m_params.a).cast<int>();
   IVec inds_b = (frac_pos.row(1) * m_params.b).cast<int>();
   IVec inds_c = (frac_pos.row(2) * m_params.c).cast<int>();
-  Mat3N pos = m_unit_cell.to_cartesian(frac_pos);
-  for (int atom_i = 0; atom_i < atoms.size(); atom_i++) {
-    Atom atom = atoms[atom_i];
-    Vec3 atom_pos = pos.col(atom_i);
-    atom.update_position(atom_pos);
-    int ind_a = inds_a[atom_i];
-    int ind_b = inds_b[atom_i];
-    int ind_c = inds_c[atom_i];
-    cell_at(ind_a + m_params.num_ghosts, ind_b + m_params.num_ghosts,
-            ind_c + m_params.num_ghosts)
-        .add_atom(atom);
+  // Mat3N pos = m_unit_cell.to_cartesian(frac_pos);
+  Mat3N cart_pos = nlp.wrapped_cart_pos;
+  for (int ent_i = 0; ent_i < nlp.size(); ent_i++) {
+    Vec3 ent_pos = cart_pos.col(ent_i);
+    int ind_a = inds_a[ent_i];
+    int ind_b = inds_b[ent_i];
+    int ind_c = inds_c[ent_i];
+    this->cell_at(ind_a + m_params.num_ghosts, ind_b + m_params.num_ghosts,
+                  ind_c + m_params.num_ghosts)
+        .add_entity(ent_i, ent_pos);
     if (ind_a >= m_params.num_ghosts && ind_a < m_params.a_upper &&
         ind_b >= m_params.num_ghosts && ind_b < m_params.b_upper &&
         ind_c >= m_params.num_ghosts && ind_c < m_params.c_upper) {
@@ -123,28 +142,83 @@ void CellList::update(const std::span<Atom> atoms, const Mat3N atoms_pos) {
           }
           int a_shift = ia * a, b_shift = ib * b, c_shift = ic * c;
           Vec3 shift = m_unit_cell.direct() * Vec3(a_shift, b_shift, c_shift);
-          cell_at(ind_a + a_shift * m_params.a + m_params.num_ghosts,
-                  ind_b + b_shift * m_params.b + m_params.num_ghosts,
-                  ind_c + c_shift * m_params.c + m_params.num_ghosts)
-              .m_atoms.emplace_back(atom.create_ghost(shift));
+          Vec3 ent_shift = ent_pos + shift;
+          this->cell_at(ind_a + a_shift * m_params.a + m_params.num_ghosts,
+                        ind_b + b_shift * m_params.b + m_params.num_ghosts,
+                        ind_c + c_shift * m_params.c + m_params.num_ghosts)
+              .add_entity(ent_i, ent_shift);
         }
       }
     }
   }
 }
 
-VerletList::VerletList(const UnitCell &unit_cell, double cutoff,
-                       int num_threads)
-    : m_unit_cell(unit_cell), m_cutoff(cutoff), m_cutoffsq(cutoff * cutoff),
-      m_num_threads(num_threads) {
-  if (m_num_threads > 0) {
-    omp_set_num_threads(m_num_threads);
+void CellList::cell_loop(const NeighbourCallback &callback) const {
+#pragma omp parallel for num_threads(m_num_threads)
+  for (size_t cell_i = 0; cell_i < m_params.total_real; cell_i++) {
+    size_t center_cell_idx = m_cell_indices[cell_i];
+    auto center_entities = m_cells[center_cell_idx].get_entities();
+    for (size_t i = 0; i < center_entities.size(); ++i) {
+      const Entity &ent1 = center_entities[i];
+      for (size_t j = i + 1; j < center_entities.size(); ++j) {
+        const Entity &ent2 = center_entities[j];
+        double rsq = ent1.square_distance(ent2);
+        if (rsq <= m_cutoffsq) {
+          callback(ent1, ent2, rsq);
+        }
+      }
+    }
+    std::vector<size_t> neighs = m_cell_neighs.at(center_cell_idx);
+    for (const size_t &neigh_idx : neighs) {
+      auto neigh_entities = m_cells[neigh_idx].get_entities();
+      for (const Entity &ent1 : center_entities) {
+        for (const Entity &ent2 : neigh_entities) {
+          double rsq = ent1.square_distance(ent2);
+          if (rsq <= m_cutoffsq) {
+            callback(ent1, ent2, rsq);
+          }
+        }
+      }
+    }
   }
 }
 
-void VerletList::update(const std::span<Atom> atoms, Mat3N atom_positions) {
-  m_atoms = atoms;
-  m_atom_positions = atom_positions;
+VerletList::VerletList(const UnitCell &unit_cell, double rcut,
+                       size_t num_threads)
+    : NeighbourListBase(unit_cell, rcut, num_threads) {
+  if (m_num_threads > 0) {
+    size_t opt_nt = determine_opt_num_threads();
+    omp_set_num_threads(opt_nt);
+  }
 }
+
+size_t VerletList::determine_opt_num_threads() {
+  // FIXME:
+  return 1;
+}
+
+void VerletList::update(const NeighbourListPacket &np) { m_neighpack = np; }
+
+void VerletList::verlet_loop(const NeighbourCallback &callback) const {
+#pragma omp parallel for collapse(2)
+  for (size_t i = 0; i < m_neighpack.size(); ++i) {
+    for (size_t j = i + 1; j < m_neighpack.size(); ++j) {
+      Vec3 ent_pos_i = m_neighpack.wrapped_cart_pos.col(i);
+      Vec3 ent_pos_j = m_neighpack.wrapped_cart_pos.col(j);
+      Vec3 dr = ent_pos_j - ent_pos_i;
+      if (!m_unit_cell.dummy()) {
+        Vec3 frac_dr = m_unit_cell.to_fractional(dr);
+        frac_dr = frac_dr.array() - frac_dr.array().round();
+        dr = m_unit_cell.to_cartesian(frac_dr);
+      }
+      double rsq = dr.squaredNorm();
+      if (rsq <= m_cutoffsq) {
+        Entity ent_i(i, ent_pos_i);
+        Entity ent_j(j, ent_pos_j);
+        callback(ent_i, ent_j, rsq);
+      }
+    }
+  }
+};
 
 } // namespace trajan::core

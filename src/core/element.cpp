@@ -2,7 +2,14 @@
 #include <trajan/core/log.h>
 #include <trajan/core/util.h>
 
-namespace trajan::core {
+namespace trajan::core::element {
+
+ElementData *max_element =
+    std::max_element(std::begin(ELEMENTDATA_TABLE), std::end(ELEMENTDATA_TABLE),
+                     [](const ElementData &a, const ElementData &b) {
+                       return a.covalent_radius < b.covalent_radius;
+                     });
+double cov_cutoff = max_element->covalent_radius * max_element->covalent_radius;
 
 Element::Element(int num) : m_data(ELEMENTDATA_TABLE[0]) {
   if (num > ELEMENT_MAX) {
@@ -68,4 +75,4 @@ std::string chemical_formula(const std::vector<Element> &els) {
   return result;
 }
 
-} // namespace trajan::core
+} // namespace trajan::core::element

@@ -3,23 +3,33 @@
 #include <algorithm>
 #include <optional>
 #include <string>
+#include <trajan/core/atom.h>
+#include <trajan/core/molecule.h>
+#include <trajan/core/neigh.h>
 #include <trajan/core/util.h>
 #include <variant>
 #include <vector>
 
 namespace trajan::io {
 
-struct IndexSelection {
-  std::vector<int> indices;
+using Atom = trajan::core::Atom;
+using Molecule = trajan::core::Molecule;
+
+template <typename T> struct Selection {
+  std::vector<T> data;
+
+  auto begin() { return data.begin(); }
+  auto end() { return data.end(); }
+
+  auto begin() const { return data.begin(); }
+  auto end() const { return data.end(); }
 };
 
-struct AtomTypeSelection {
-  std::vector<std::string> types;
-};
+struct IndexSelection : public Selection<int> {};
 
-struct MoleculeSelection {
-  std::vector<int> molecule_ids;
-};
+struct AtomTypeSelection : public Selection<std::string> {};
+
+struct MoleculeSelection : public Selection<int> {};
 
 using SelectionCriteria =
     std::variant<IndexSelection, AtomTypeSelection, MoleculeSelection>;
@@ -97,6 +107,43 @@ private:
     return std::make_pair(*start, *end);
   }
 };
+
+template <typename SelectionType, typename VariantType>
+core::Entities
+process_selection(const VariantType &selection, std::vector<Atom> &atoms,
+                  std::vector<Molecule> &molecules, core::Entities &entities) {
+  if constexpr (std::is_same_v<SelectionType, io::IndexSelection>) {
+    const io::IndexSelection &is = std::get<io::IndexSelection>(selection);
+    for (Atom &atom : atoms) {
+      for (const int &idx : is) {
+        if (atom.index == idx) {
+          entities.push_back(atom);
+        }
+      }
+    }
+  } else if constexpr (std::is_same_v<SelectionType, io::AtomTypeSelection>) {
+    const io::AtomTypeSelection &ats =
+        std::get<io::AtomTypeSelection>(selection);
+    for (Atom &atom : atoms) {
+      for (const std::string &at : ats) {
+        if (atom.type == at) {
+          entities.push_back(atom);
+        }
+      }
+    }
+  } else if constexpr (std::is_same_v<SelectionType, io::MoleculeSelection>) {
+    const io::MoleculeSelection &mis =
+        std::get<io::MoleculeSelection>(selection);
+    for (Molecule &molecule : molecules) {
+      for (const int &mi : mis) {
+        if (molecule.index == mi) {
+          entities.push_back(molecule);
+        }
+      }
+    }
+  }
+  return entities;
+}
 
 inline auto selection_validator =
     [](std::optional<SelectionCriteria> &parsed_sel) {

@@ -1,13 +1,15 @@
 #pragma once
-
 #include <algorithm>
 #include <cctype>
+#include <filesystem>
 #include <sstream>
 #include <string>
 #include <trajan/core/linear_algebra.h>
 #include <vector>
 
 namespace trajan::util {
+
+namespace fs = std::filesystem;
 
 static inline void capitalize(std::string &s) {
   s[0] = std::toupper(s[0]);
@@ -100,5 +102,26 @@ constexpr bool is_close(T a, T b,
                         const T atol = Eigen::NumTraits<T>::epsilon()) {
   return abs(a - b) <= (atol + rtol * abs(b));
 }
+
+static inline double square_distance(Vec3 &p1, Vec3 &p2) {
+  double dx = p1.x() - p2.x(), dy = p1.y() - p2.y(), dz = p1.z() - p2.z();
+  return dx * dx + dy * dy + dz * dz;
+}
+
+template <typename T>
+static inline const std::vector<T>
+combine_vectors(const std::vector<std::vector<T>> &vecs) {
+  std::vector<T> combined_vec;
+  for (const std::vector<T> &vec : vecs) {
+    combined_vec.reserve(combined_vec.size() + vec.size());
+    combined_vec.insert(combined_vec.end(), vec.begin(), vec.end());
+  }
+  return combined_vec;
+}
+
+struct Opts {
+  size_t num_threads;
+  std::vector<fs::path> infiles;
+};
 
 } // namespace trajan::util

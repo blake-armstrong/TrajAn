@@ -1,5 +1,5 @@
-#include "trajan/io/selection.h"
-#include "trajan/core/util.h"
+#include <trajan/core/util.h>
+#include <trajan/io/selection.h>
 
 #include <string>
 
@@ -72,14 +72,4 @@ SelectionParser::parse(const std::string &input) {
   }
 }
 
-// auto selection_validator = [](std::optional<SelectionCriteria> &parsed_sel) {
-//   return [parsed_sel = &parsed_sel](const std::string &input) {
-//     auto result = SelectionParser::parse(input);
-//     if (!result) {
-//       return std::string("Invalid selection format");
-//     }
-//     *parsed_sel = result;
-//     return std::string();
-//   };
-// };
 } // namespace trajan::io

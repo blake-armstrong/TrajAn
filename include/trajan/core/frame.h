@@ -1,25 +1,51 @@
 #pragma once
 #include <trajan/core/atom.h>
+#include <trajan/core/molecule.h>
+#include <trajan/core/neigh.h>
 #include <trajan/core/unit_cell.h>
 #include <vector>
 
 namespace trajan::core {
-class Frame {
-public:
-  void set_atoms(std::vector<Atom> &atoms);
-  std::vector<Atom> get_atoms() const { return m_atoms; };
-  Mat3N get_atom_positions() const { return m_atom_positions; };
 
-  void set_uc(UnitCell &uc) { m_uc = uc; };
-  UnitCell get_uc() { return m_uc; }
+struct Frame {
+
+public:
+  enum UpdateFlags {
+    UNINITIALISED = 0,
+    UC_INIT = 1,
+    ATOMS_INIT = 2,
+    INITIALISED = 3
+  };
+
+  inline const UnitCell &unit_cell() const { return m_uc; }
+  inline void set_uc(UnitCell &uc) {
+    m_uc = uc;
+    m_positions_needs_update |= UC_INIT;
+  }
+
+  inline const std::vector<Atom> &atoms() const { return m_atoms; }
+  void set_atoms(std::vector<Atom> &atoms);
+
+  inline const Mat3N &cart_pos() const { return m_cart_pos; }
+  inline const Mat3N &wrapped_cart_pos() const { return m_wrapped_cart_pos; }
+  inline const Mat3N &frac_pos() const { return m_frac_pos; }
+
+  inline void set_frac_pos(Mat3N &frac_pos) { m_frac_pos = frac_pos; };
+  inline void set_wrapped_cart_pos(Mat3N &wrapped_cart_pos) {
+    m_wrapped_cart_pos = wrapped_cart_pos;
+  };
 
 private:
-  static constexpr int EMPTY = -1;
-  std::vector<Atom> m_atoms;
-  Mat3N m_atom_positions;
   UnitCell m_uc;
-  int m_num_atoms = EMPTY;
-  double m_time;
-  int m_index = 0;
+  std::vector<Atom> m_atoms;
+
+  size_t m_num_atoms = 0;
+  Mat3N m_cart_pos;
+  Mat3N m_frac_pos;
+  Mat3N m_wrapped_cart_pos;
+
+  void update_positions();
+  unsigned int m_positions_needs_update = UNINITIALISED;
 };
+
 }; // namespace trajan::core

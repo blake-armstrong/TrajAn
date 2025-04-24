@@ -4,7 +4,7 @@
 #include <vector>
 #define ELEMENT_MAX 103
 
-namespace trajan::core {
+namespace trajan::core::element {
 
 class ElementData {
 public:
@@ -207,4 +207,4 @@ private:
 
 std::string chemical_formula(const std::vector<Element> &elements);
 
-} // namespace trajan::core
+} // namespace trajan::core::element

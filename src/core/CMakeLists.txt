@@ -8,9 +8,10 @@ add_library(
   "${CMAKE_CURRENT_SOURCE_DIR}/neigh.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/log.cpp" 
   "${CMAKE_CURRENT_SOURCE_DIR}/atom.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/trajectory.cpp"
 )
 
-target_link_libraries(trajan_core PUBLIC fmt::fmt spdlog::spdlog Eigen3::Eigen OpenMP::OpenMP_CXX)
+target_link_libraries(trajan_core PUBLIC fmt::fmt spdlog::spdlog Eigen3::Eigen OpenMP::OpenMP_CXX unordered_dense::unordered_dense)
 
 target_include_directories(trajan_core PUBLIC "${TRAJAN_INCLUDE_DIR}")
 

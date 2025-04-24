@@ -10,6 +10,12 @@ cpmaddpackage(
 
 cpmaddpackage(NAME CLI11 GITHUB_REPOSITORY "CLIUtils/CLI11" VERSION "2.4.1")
 
+CPMAddPackage(
+    NAME unordered_dense
+    GITHUB_REPOSITORY "martinus/unordered_dense"
+    VERSION "4.5.0"
+)
+
 cpmaddpackage(
   NAME
   spdlog

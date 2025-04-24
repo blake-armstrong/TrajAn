@@ -19,8 +19,9 @@ int main(int argc, char *argv[]) {
   verbosity_option->run_callback_for_default();
   verbosity_option->force_callback();
 
-  // main object
-  // auto trajan = std::make_shared<trajan::TRAJAN>();
+  // default to available system cores
+  app.add_option("--threads,-t", "Number of threads to use for operations")
+      ->default_val(std::thread::hardware_concurrency());
 
   // add all the subcommands here
   // auto *inp = trajan::main::add_input_subcommand(app);
@@ -29,7 +30,7 @@ int main(int argc, char *argv[]) {
   // display default info
   trajan::main::print_header();
 
-  // ensure we have a subcommand
+  // used to ensure we have a subcommand
   app.require_subcommand(/* min */ 0, /* max */ 0);
 
   constexpr auto *error_format = "exception:\n    {}\nterminating program.\n ";
