@@ -4,7 +4,7 @@
 #include <stdexcept>
 #include <trajan/core/log.h>
 #include <trajan/io/dcd.h>
-#include <trajan/io/file.h>
+#include <trajan/io/file_handler.h>
 #include <trajan/io/pdb.h>
 #include <unordered_map>
 
@@ -15,6 +15,19 @@ namespace fs = std::filesystem;
 static const std::unordered_map<std::string, std::function<FileHandlerPtr()>>
     handler_map = {{".pdb", []() { return std::make_unique<PDBHandler>(); }},
                    {".dcd", []() { return std::make_unique<DCDHandler>(); }}};
+
+bool FileHandler::initialise() {
+  bool initialised = this->_initialise();
+  if (!initialised) {
+    throw std::runtime_error(fmt::format(
+        "Unable to open file for reading: '{}'", this->file_name()));
+  }
+  trajan::log::debug(
+      fmt::format("Successfully opened file '{}'", this->file_name()));
+  return initialised;
+}
+
+void FileHandler::finalise() { return this->_finalise(); }
 
 bool FileHandler::read_frame(core::Frame &frame) {
   bool has_more_frames = this->read_next_frame(frame);
@@ -29,9 +42,11 @@ bool FileHandler::validate_frame(core::Frame &frame) {
   if (atoms.empty()) {
     throw std::runtime_error("No atoms found.");
   }
+  trajan::log::debug("Frame atoms = {}", atoms.size());
   core::UnitCell uc = frame.unit_cell();
   Mat3N cart_pos = frame.cart_pos();
   if (!uc.init()) {
+    trajan::log::debug("Creating a dummy unit cell.");
     // create dummy unit cell for neighlist
     Vec3 min_vals = cart_pos.rowwise().minCoeff();
     Vec3 max_vals = cart_pos.rowwise().maxCoeff();
@@ -45,6 +60,7 @@ bool FileHandler::validate_frame(core::Frame &frame) {
     frame.set_wrapped_cart_pos(cart_pos);
     return true;
   }
+  trajan::log::debug("Found a real unit cell.");
   Mat3N frac_pos = uc.to_fractional(cart_pos);
   frac_pos = frac_pos.array() - frac_pos.array().floor();
   frame.set_frac_pos(frac_pos);

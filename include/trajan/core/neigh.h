@@ -1,9 +1,11 @@
 #pragma once
 #include <ankerl/unordered_dense.h>
+#include <fmt/format.h>
 #include <omp.h>
 #include <stdexcept>
 #include <trajan/core/atom.h>
 #include <trajan/core/linear_algebra.h>
+#include <trajan/core/log.h>
 #include <trajan/core/molecule.h>
 #include <trajan/core/unit_cell.h>
 #include <variant>
@@ -43,6 +45,34 @@ struct Entity {
 };
 
 using EntityType = std::variant<Atom, Molecule>;
+
+struct VariantHash {
+  std::size_t operator()(const std::variant<Atom, Molecule> &var) const {
+    if (std::holds_alternative<Atom>(var)) {
+      const Atom &atom = std::get<Atom>(var);
+      return std::hash<int>{}(atom.index);
+    } else {
+      const Molecule &molecule = std::get<Molecule>(var);
+      return std::hash<int>{}(molecule.index);
+    }
+  }
+};
+
+struct VariantEqual {
+  bool operator()(const std::variant<Atom, Molecule> &lhs,
+                  const std::variant<Atom, Molecule> &rhs) const {
+    if (lhs.index() != rhs.index()) {
+      return false;
+    }
+
+    if (std::holds_alternative<Atom>(lhs)) {
+      return std::get<Atom>(lhs) == std::get<Atom>(rhs);
+    } else {
+      return std::get<Molecule>(lhs) == std::get<Molecule>(rhs);
+    }
+  }
+};
+
 using Entities = std::vector<EntityType>;
 
 struct NeighbourListPacket {
@@ -70,6 +100,16 @@ struct NeighbourListPacket {
       throw std::runtime_error(
           "Entities vector and position matrix not same size.");
     };
+  }
+
+  void print() const {
+    for (size_t i = 0; i < entities.size(); i++) {
+      trajan::log::debug(fmt::format(
+          "NLP: {:>6} {:>8.3f} {:>8.3f} {:>8.3f} {:>8.3f} {:>8.3f} {:>8.3f}", i,
+          wrapped_cart_pos.col(i).x(), wrapped_cart_pos.col(i).y(),
+          wrapped_cart_pos.col(i).z(), wrapped_frac_pos.col(i).x(),
+          wrapped_frac_pos.col(i).y(), wrapped_frac_pos.col(i).z()));
+    }
   }
 };
 

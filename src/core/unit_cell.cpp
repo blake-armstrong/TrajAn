@@ -162,4 +162,33 @@ UnitCell dummy_cell(double a, double b, double c) {
   return uc;
 }
 
+std::pair<Mat3N, Mat3N> wrap_coordinates(Mat3N &cart_pos,
+                                         trajan::core::UnitCell &uc) {
+  if (uc.dummy()) {
+    Vec3 min_vals = cart_pos.rowwise().minCoeff();
+    Mat3N shifted_cart_pos = cart_pos.colwise() - min_vals;
+    Mat3N frac_pos = uc.to_fractional(shifted_cart_pos);
+    return {frac_pos, cart_pos};
+  } else {
+    // for (size_t i = 0; i < cart_pos.cols(); i++) {
+    //   trajan::log::debug(fmt::format("INIT: {:>6} {:>8.3f} {:>8.3f}
+    //   {:>8.3f}",
+    //                                  i, cart_pos.col(i).x(),
+    //                                  cart_pos.col(i).y(),
+    //                                  cart_pos.col(i).z()));
+    // }
+    Mat3N frac_pos = uc.to_fractional(cart_pos);
+    // for (size_t i = 0; i < cart_pos.cols(); i++) {
+    //   trajan::log::debug(fmt::format("FP: {:>6} {:>8.3f} {:>8.3f} {:>8.3f}",
+    //   i,
+    //                                  frac_pos.col(i).x(),
+    //                                  frac_pos.col(i).y(),
+    //                                  frac_pos.col(i).z()));
+    // }
+    frac_pos = frac_pos.array() - frac_pos.array().floor();
+    Mat3N wrapped_cart_pos = uc.to_cartesian(frac_pos);
+    return {frac_pos, wrapped_cart_pos};
+  }
+}
+
 } // namespace trajan::core

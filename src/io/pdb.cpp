@@ -6,18 +6,20 @@
 #include <trajan/core/frame.h>
 #include <trajan/core/log.h>
 #include <trajan/core/unit_cell.h>
+#include <trajan/core/units.h>
 #include <trajan/io/pdb.h>
 
 namespace trajan::io {
 
 namespace core = trajan::core;
+using trajan::units::radians;
 
-bool PDBHandler::initialise() {
+bool PDBHandler::_initialise() {
   m_file.open(this->file_path());
   return m_file.is_open();
 }
 
-void PDBHandler::finalise() {
+void PDBHandler::_finalise() {
   if (m_file.is_open()) {
     m_file.close();
   }
@@ -32,9 +34,15 @@ bool PDBHandler::parse_pdb(core::Frame &frame) {
       trajan::log::debug("Found unit cell from CRYST1 line in PDB.");
       double a, b, c, alpha, beta, gamma;
       char record_name[7], sg[12], z[5];
-      int result = std::sscanf(line.c_str(), PDB_CRYST_FMT.data(), record_name,
-                               &a, &b, &c, &alpha, &beta, &gamma, sg, z);
-      core::UnitCell uc = core::triclinic_cell(a, b, c, alpha, beta, gamma);
+      int result =
+          std::sscanf(line.c_str(), PDB_CRYST_FMT_READ.data(), record_name, &a,
+                      &b, &c, &alpha, &beta, &gamma, sg, z);
+      record_name[6] = '\0';
+      sg[11] = '\0';
+      z[4] = '\0';
+      core::UnitCell uc = core::triclinic_cell(a, b, c, radians(alpha),
+                                               radians(beta), radians(gamma));
+      // core::UnitCell uc = trajan::core::cubic_cell(25);
       trajan::log::debug(fmt::format("uc: {}", uc.dummy()));
       frame.set_uc(uc);
       continue;
@@ -43,21 +51,30 @@ bool PDBHandler::parse_pdb(core::Frame &frame) {
       continue;
     };
     core::Atom atom;
-    char record_name[7], name_buffer[5], altLoc, resName[4], i_code,
-        element_buffer[3], charge[3], chainID;
+    char record_name[7], name_buffer[5], alt_loc[2], res_name[4], ins_code[2],
+        tmp[12];
+    char chain_id[2], element_buffer[3], charge[3];
     int serial, res_seq;
-    double occupancy, temp_factor;
+    float occupancy, temp_factor;
 
-    // format string based on PDB standard
-    int result = std::sscanf(line.c_str(), PDB_LINE_FMT.data(), record_name,
-                             &serial, name_buffer, &altLoc, resName, &chainID,
-                             &res_seq, &i_code, &atom.x, &atom.y, &atom.z,
-                             &occupancy, &temp_factor, element_buffer, charge);
-
+    int result =
+        std::sscanf(line.c_str(), PDB_LINE_FMT_READ.data(), record_name,
+                    &serial, tmp, name_buffer, alt_loc, res_name, tmp, chain_id,
+                    &res_seq, ins_code, tmp, &atom.x, &atom.y, &atom.z,
+                    &occupancy, &temp_factor, tmp, element_buffer, charge);
     if (result != 15) {
       std::runtime_error(fmt::format("Failed to parse line: '{}'", line));
     }
-
+    name_buffer[4] = '\0';
+    alt_loc[1] = '\0';
+    res_name[3] = '\0';
+    chain_id[1] = '\0';
+    ins_code[1] = '\0';
+    element_buffer[2] = '\0';
+    charge[2] = '\0';
+    atom.serial = serial;
+    atom.type = name_buffer;
+    trajan::util::trim(atom.type);
     std::string element_identifier;
     bool exact;
     std::string element = element_buffer;
@@ -69,6 +86,7 @@ bool PDBHandler::parse_pdb(core::Frame &frame) {
       element_identifier = name_buffer;
     }
     atom.element = core::element::Element(element_identifier, exact);
+    atom.index = atoms.size();
     atoms.push_back(atom);
   }
   frame.set_atoms(atoms);

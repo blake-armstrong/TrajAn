@@ -2,7 +2,7 @@
 
 #include <CLI/CLI.hpp>
 #include <string>
-#include <trajan/io/file.h>
+#include <trajan/io/file_handler.h>
 #include <trajan/io/selection.h>
 
 namespace trajan::main {

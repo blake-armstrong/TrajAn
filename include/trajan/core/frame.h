@@ -18,13 +18,11 @@ public:
   };
 
   inline const UnitCell &unit_cell() const { return m_uc; }
-  inline void set_uc(UnitCell &uc) {
-    m_uc = uc;
-    m_positions_needs_update |= UC_INIT;
-  }
+  void set_uc(UnitCell &uc);
 
   inline const std::vector<Atom> &atoms() const { return m_atoms; }
-  void set_atoms(std::vector<Atom> &atoms);
+  void set_atoms(const std::vector<Atom> &atoms);
+  inline size_t num_atoms() const { return m_num_atoms; }
 
   inline const Mat3N &cart_pos() const { return m_cart_pos; }
   inline const Mat3N &wrapped_cart_pos() const { return m_wrapped_cart_pos; }

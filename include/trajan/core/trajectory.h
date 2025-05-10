@@ -16,6 +16,7 @@ public:
 
   inline Frame &frame() { return m_frame; }
   inline const std::vector<Atom> &atoms() const { return m_frame.atoms(); }
+  inline size_t num_atoms() const { return m_frame.num_atoms(); }
 
   inline const UnitCell &unit_cell() const { return m_frame.unit_cell(); }
   // void update_frame();

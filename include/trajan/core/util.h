@@ -1,8 +1,10 @@
 #pragma once
 #include <algorithm>
+#include <ankerl/unordered_dense.h>
 #include <cctype>
 #include <filesystem>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <trajan/core/linear_algebra.h>
 #include <vector>
@@ -118,6 +120,180 @@ combine_vectors(const std::vector<std::vector<T>> &vecs) {
   }
   return combined_vec;
 }
+
+template <typename T>
+static inline std::vector<T> deduplicate(const std::vector<T> &input) {
+  std::vector<T> result;
+  ankerl::unordered_dense::set<T> seen;
+
+  result.reserve(input.size());
+  for (const auto &element : input) {
+    if (seen.insert(element).second) {
+      result.push_back(element);
+    }
+  }
+
+  return result;
+}
+
+template <typename T, typename Hash = std::hash<T>,
+          typename Equal = std::equal_to<T>>
+static inline std::vector<T> deduplicate_variant(const std::vector<T> &input,
+                                                 Hash hasher = Hash(),
+                                                 Equal equal = Equal()) {
+  std::vector<T> result;
+  ankerl::unordered_dense::set<T, Hash, Equal> seen(0, hasher, equal);
+
+  result.reserve(input.size());
+
+  for (const auto &element : input) {
+    if (seen.insert(element).second) {
+      result.push_back(element);
+    }
+  }
+
+  return result;
+}
+
+// template <typename T, typename Hash = std::hash<T>,
+//           typename Equal = std::equal_to<T>>
+// std::pair<std::vector<T>, std::vector<size_t>>
+// combine_deduplicate_map(const std::vector<std::vector<T>> &vecs,
+//                         Hash hasher = Hash(), Equal equal = Equal()) {
+//
+//   std::vector<T> result;
+//   std::vector<size_t> source_map;
+//
+//   size_t total_size = 0;
+//   for (const auto &vec : vecs) {
+//     total_size += vec.size();
+//   }
+//
+//   result.reserve(total_size);
+//   source_map.reserve(total_size);
+//
+//   ankerl::unordered_dense::set<T, Hash, Equal> seen(0, hasher, equal);
+//
+//   for (size_t vec_idx = 0; vec_idx < vecs.size(); ++vec_idx) {
+//     for (const auto &element : vecs[vec_idx]) {
+//       if (seen.insert(element).second) {
+//         result.push_back(element);
+//         source_map.push_back(vec_idx);
+//       }
+//     }
+//   }
+//
+//   return {result, source_map};
+// }
+
+template <typename T, typename Hash = std::hash<T>,
+          typename Equal = std::equal_to<T>>
+static inline std::pair<std::vector<T>, std::vector<std::bitset<8>>>
+combine_deduplicate_map(const std::vector<std::vector<T>> &vecs,
+                        Hash hasher = Hash(), Equal equal = Equal()) {
+
+  std::vector<T> result;
+  size_t total_size = 0;
+  for (const auto &vec : vecs) {
+    total_size += vec.size();
+  }
+  result.reserve(total_size);
+  ankerl::unordered_dense::map<T, size_t, Hash, Equal> element_to_index;
+  std::vector<std::bitset<8>> presence_tracker;
+  for (size_t vec_idx = 0; vec_idx < vecs.size(); ++vec_idx) {
+    for (const auto &element : vecs[vec_idx]) {
+      auto it = element_to_index.find(element);
+      if (it == element_to_index.end()) {
+        result.push_back(element);
+        std::bitset<8> presence;
+        presence.set(vec_idx);
+        presence_tracker.push_back(presence);
+        element_to_index[element] = result.size() - 1;
+
+      } else {
+        presence_tracker[it->second].set(vec_idx);
+      }
+    }
+  }
+  return {result, presence_tracker};
+}
+
+// template <typename T, typename Hash = std::hash<T>,
+//           typename Equal = std::equal_to<T>>
+// static inline std::pair<std::vector<T>, std::vector<uint8_t>>
+// combine_deduplicate_map(const std::vector<std::vector<T>> &vecs,
+//                         Hash hasher = Hash(), Equal equal = Equal()) {
+//
+//   std::vector<T> result;
+//   // apping from result index to a bitmask of source vector indices
+//   // Bit 0 = present in vecs[0], Bit 1 = present in vecs[1], etc.
+//   std::vector<uint8_t> source_map;
+//   size_t total_size = 0;
+//   for (const auto &vec : vecs) {
+//     total_size += vec.size();
+//   }
+//
+//   result.reserve(total_size);
+//   source_map.reserve(total_size);
+//
+//   if (vecs.size() > 8) {
+//     throw std::runtime_error("Too many vectors for uint8_t bitmask");
+//   }
+//
+//   ankerl::unordered_dense::map<T, size_t, Hash, Equal> element_indices(
+//       0, hasher, equal);
+//
+//   for (size_t vec_idx = 0; vec_idx < vecs.size(); ++vec_idx) {
+//     uint8_t vec_bit = static_cast<uint8_t>(1 << vec_idx);
+//     for (const auto &element : vecs[vec_idx]) {
+//       auto [it, inserted] = element_indices.try_emplace(element,
+//       result.size());
+//
+//       if (inserted) {
+//         result.push_back(element);
+//         source_map.push_back(vec_bit);
+//       } else {
+//         source_map[it->second] |= vec_bit;
+//       }
+//     }
+//   }
+//   return {result, source_map};
+// }
+//
+// template <typename Container>
+// inline bool covers_all_vectors(const Container &source_maps,
+//                                size_t num_vectors) {
+//   uint8_t combined_mask = 0;
+//
+//   for (const auto &source : source_maps) {
+//     combined_mask |= source;
+//   }
+//
+//   uint8_t required_mask = (1 << num_vectors) - 1;
+//   return (combined_mask & required_mask) == required_mask;
+// }
+//
+// inline bool is_cross_section_any(uint8_t source_i, uint8_t source_j,
+//                                  size_t num_vectors = 2) {
+//   std::array<uint8_t, 2> sources = {source_i, source_j};
+//   return covers_all_vectors(sources, num_vectors);
+// }
+//
+// template <typename... Args> inline bool is_cross_section_any(Args...
+// sources)
+// {
+//   std::array<uint8_t, sizeof...(Args)> source_array = {
+//       static_cast<uint8_t>(sources)...};
+//   size_t num_vectors = sizeof...(Args);
+//   return covers_all_vectors(source_array, num_vectors);
+// }
+//
+// template <typename... Args>
+// inline bool forms_cross_section(size_t num_vectors, Args... sources) {
+//   std::array<uint8_t, sizeof...(Args)> source_array = {
+//       static_cast<uint8_t>(sources)...};
+//   return covers_all_vectors(source_array, num_vectors);
+// }
 
 struct Opts {
   size_t num_threads;

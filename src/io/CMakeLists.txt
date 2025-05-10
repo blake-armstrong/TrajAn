@@ -1,6 +1,6 @@
 add_library(trajan_io "${CMAKE_CURRENT_SOURCE_DIR}/pdb.cpp"
                      "${CMAKE_CURRENT_SOURCE_DIR}/dcd.cpp"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/file.cpp"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/file_handler.cpp"
                      "${CMAKE_CURRENT_SOURCE_DIR}/selection.cpp"
 )
 

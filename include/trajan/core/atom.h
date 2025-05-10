@@ -16,7 +16,7 @@ struct Atom {
   double x, y, z;
   element::Element element;
   std::string type;
-  size_t index;
+  size_t index, serial;
   Atom() : element(0), index(0) {}
   Atom(const Vec3 &pos, int atomic_number, int index)
       : x(pos[0]), y(pos[1]), z(pos[2]),
@@ -66,6 +66,10 @@ struct Atom {
   is_bonded_with_rsq(const Atom &other, double rsq,
                      double bond_tolerance = 0.4) const {
     return is_bonded_with_sq_distance(other, rsq, bond_tolerance);
+  }
+
+  inline bool operator==(const Atom &rhs) const {
+    return this->index == rhs.index;
   }
 
 private:

@@ -1,5 +1,6 @@
 #pragma once
 #include <trajan/core/linear_algebra.h>
+#include <trajan/core/log.h>
 #include <trajan/core/units.h>
 #include <trajan/core/util.h>
 
@@ -151,7 +152,7 @@ public:
    */
   inline auto to_fractional(const Mat3N &coords) const {
     Mat3N frac_pos = m_inverse * coords;
-    frac_pos = frac_pos.array() - frac_pos.array().floor();
+    // frac_pos = frac_pos.array() - frac_pos.array().floor();
     return frac_pos;
   }
 
@@ -251,4 +252,8 @@ UnitCell triclinic_cell(double a, double b, double c, double alpha, double beta,
                         double gamma);
 /// Construct a dummy cell for non-periodic simulations
 UnitCell dummy_cell(double a, double b, double c);
+
+std::pair<Mat3N, Mat3N> wrap_coordinates(Mat3N &cart_pos,
+                                         trajan::core::UnitCell &uc);
+
 }; // namespace trajan::core

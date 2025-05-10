@@ -6,7 +6,6 @@
 #include <string>
 #include <trajan/core/frame.h>
 #include <trajan/core/trajectory.h>
-#include <unordered_map>
 #include <vector>
 
 namespace trajan::io {
@@ -24,9 +23,9 @@ public:
 
   inline virtual FileType file_type() const = 0;
 
-  virtual bool initialise() = 0;
+  bool initialise();
   bool read_frame(core::Frame &frame);
-  virtual void finalise() = 0;
+  void finalise();
 
   // bool read_frame(core::Frame &frame);
 
@@ -39,6 +38,8 @@ public:
 
 protected:
   std::ifstream m_file;
+  virtual bool _initialise() = 0;
+  virtual void _finalise() = 0;
   virtual bool read_next_frame(core::Frame &frame) = 0;
   bool validate_frame(core::Frame &frame);
 

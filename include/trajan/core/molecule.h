@@ -23,7 +23,7 @@ class Molecule {
 public:
   double x, y, z;
   std::string type;
-  int index;
+  size_t index;
 
   enum Origin {
     Cartesian,   /**< The Cartesian origin i.e. (0, 0, 0) in R3 */
@@ -53,6 +53,10 @@ public:
   }
 
   inline size_t size() const { return m_atomic_numbers.size(); }
+
+  inline bool operator==(const Molecule &rhs) const {
+    return this->index == rhs.index;
+  }
 
 private:
   int charge = 0;

@@ -1,7 +1,8 @@
-#include "trajan/core/graph.h"
-#include "trajan/core/molecule.h"
+#include "trajan/core/unit_cell.h"
 #include <stdexcept>
+#include <trajan/core/graph.h>
 #include <trajan/core/log.h>
+#include <trajan/core/molecule.h>
 #include <trajan/core/neigh.h>
 #include <trajan/core/trajectory.h>
 #include <trajan/io/selection.h>
@@ -44,20 +45,35 @@ Entities Trajectory::get_entities() {
 }
 
 Entities Trajectory::get_entities(const io::SelectionCriteria &selection) {
-  using SelType = std::decay_t<decltype(selection)>;
+  // using SelType = std::decay_t<decltype(selection)>;
   std::vector<Atom> atoms = this->atoms();
   std::vector<Molecule> molecules;
   Entities entities;
   entities.reserve(atoms.size());
 
-  trajan::log::debug("Processing selection {}", typeid(SelType).name());
+  trajan::log::debug("Processing selection {}", selection.index());
 
-  if constexpr (std::is_same_v<SelType, io::MoleculeSelection>) {
+  if (std::holds_alternative<io::MoleculeSelection>(selection)) {
     // build molecules
     molecules = this->unit_cell_molecules();
   }
-  entities =
-      io::process_selection<SelType>(selection, atoms, molecules, entities);
+
+  entities = std::visit(
+      [&](const auto &sel) {
+        using ActualType = std::decay_t<decltype(sel)>;
+        trajan::log::debug("Actual selection type: {}",
+                           typeid(ActualType).name());
+        return io::process_selection<ActualType>(sel, atoms, molecules,
+                                                 entities);
+      },
+      selection);
+
+  size_t num_entities = entities.size();
+  if (num_entities == 0) {
+    // FIXME: Fix the selection names for clarity.
+    throw std::runtime_error("No entities found in selection.");
+  }
+  trajan::log::debug("Identified {} entities in selection", num_entities);
 
   return entities;
 }
@@ -82,8 +98,11 @@ Trajectory::get_neighpack_from_entities(const Entities &entities,
       std::all_of(entities.begin(), entities.end(), [](const auto &entity) {
         return std::holds_alternative<Atom>(entity);
       });
-  if (all_atoms) {
-    Frame frame = this->frame();
+  trajan::log::debug("Only atoms in entities: {}", all_atoms);
+  if ((all_atoms) && (this->num_atoms() == entities.size())) {
+    trajan::log::debug("Number of entities {} == number of atoms {}",
+                       entities.size(), this->num_atoms());
+    Frame &frame = this->frame();
     return NeighbourListPacket(entities, frame.wrapped_cart_pos(),
                                frame.frac_pos());
   }
@@ -119,19 +138,13 @@ Trajectory::get_neighpack_from_entities(const Entities &entities,
         },
         ent);
   }
+  trajan::log::debug("Number of cartesian positions from entities = {}",
+                     cart_pos.cols());
   UnitCell uc = this->unit_cell();
-  if (uc.dummy()) {
-    Vec3 min_vals = cart_pos.rowwise().minCoeff();
-    Mat3N shifted_cart_pos = cart_pos.colwise() - min_vals;
-    Mat3N frac_pos = uc.to_fractional(shifted_cart_pos);
-    nlp = NeighbourListPacket(entities, cart_pos, frac_pos);
-  } else {
-    Mat3N frac_pos = uc.to_fractional(cart_pos);
-    frac_pos = frac_pos.array() - frac_pos.array().floor();
-    Mat3N wrapped_cart_pos = uc.to_cartesian(frac_pos);
-    nlp = NeighbourListPacket(entities, wrapped_cart_pos, frac_pos);
-  }
-  return nlp;
+  auto result = trajan::core::wrap_coordinates(cart_pos, uc);
+  Mat3N frac_pos = result.first;
+  Mat3N wrapped_cart_pos = result.second;
+  return NeighbourListPacket(entities, wrapped_cart_pos, frac_pos);
 }
 
 void Trajectory::update_bond_graph() {

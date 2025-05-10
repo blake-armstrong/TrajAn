@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 #include <trajan/core/atom.h>
+#include <trajan/core/log.h>
 #include <trajan/core/molecule.h>
 #include <trajan/core/neigh.h>
 #include <trajan/core/util.h>
@@ -108,34 +109,36 @@ private:
   }
 };
 
-template <typename SelectionType, typename VariantType>
+template <typename SelectionType>
 core::Entities
-process_selection(const VariantType &selection, std::vector<Atom> &atoms,
+process_selection(const SelectionType &selection, std::vector<Atom> &atoms,
                   std::vector<Molecule> &molecules, core::Entities &entities) {
+  trajan::log::debug("Processing selection of type {}",
+                     typeid(SelectionType).name());
   if constexpr (std::is_same_v<SelectionType, io::IndexSelection>) {
-    const io::IndexSelection &is = std::get<io::IndexSelection>(selection);
+    trajan::log::debug("Identified IndexSelection.");
+
     for (Atom &atom : atoms) {
-      for (const int &idx : is) {
+      for (const int &idx : selection) {
         if (atom.index == idx) {
           entities.push_back(atom);
         }
       }
     }
   } else if constexpr (std::is_same_v<SelectionType, io::AtomTypeSelection>) {
-    const io::AtomTypeSelection &ats =
-        std::get<io::AtomTypeSelection>(selection);
+    trajan::log::debug("Identified AtomTypeSelection.");
     for (Atom &atom : atoms) {
-      for (const std::string &at : ats) {
+      for (const std::string &at : selection) {
         if (atom.type == at) {
           entities.push_back(atom);
         }
       }
     }
   } else if constexpr (std::is_same_v<SelectionType, io::MoleculeSelection>) {
-    const io::MoleculeSelection &mis =
-        std::get<io::MoleculeSelection>(selection);
+    trajan::log::debug("Identified MoleculeSelection.");
+
     for (Molecule &molecule : molecules) {
-      for (const int &mi : mis) {
+      for (const int &mi : selection) {
         if (molecule.index == mi) {
           entities.push_back(molecule);
         }

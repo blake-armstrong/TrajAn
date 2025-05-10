@@ -4,7 +4,7 @@ namespace trajan::io {
 
 namespace core = trajan::core;
 
-bool DCDHandler::initialise() {
+bool DCDHandler::_initialise() {
   m_file.open(this->file_path(), std::ios::binary);
   if (!m_file.is_open()) {
     return false;
@@ -12,7 +12,7 @@ bool DCDHandler::initialise() {
   return this->parse_dcd_header();
 }
 
-void DCDHandler::finalise() {
+void DCDHandler::_finalise() {
   if (m_file.is_open()) {
     m_file.close();
   }
