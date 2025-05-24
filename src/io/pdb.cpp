@@ -42,8 +42,6 @@ bool PDBHandler::parse_pdb(core::Frame &frame) {
       z[4] = '\0';
       core::UnitCell uc = core::triclinic_cell(a, b, c, radians(alpha),
                                                radians(beta), radians(gamma));
-      // core::UnitCell uc = trajan::core::cubic_cell(25);
-      trajan::log::debug(fmt::format("uc: {}", uc.dummy()));
       frame.set_uc(uc);
       continue;
     }

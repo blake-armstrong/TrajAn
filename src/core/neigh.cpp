@@ -1,3 +1,5 @@
+#include "trajan/core/util.h"
+#include <bitset>
 #include <omp.h>
 #include <stdexcept>
 #include <trajan/core/frame.h>
@@ -93,6 +95,7 @@ void CellList::clear_cells() {
   }
 }
 void CellList::update(const NeighbourListPacket &nlp) {
+  m_current_nlp = nlp;
   if (m_dummy) {
     if (!m_unit_cell.dummy()) {
       throw std::runtime_error("Inconsistency in dummy UC.");
@@ -118,7 +121,7 @@ void CellList::update(const NeighbourListPacket &nlp) {
     int ind_c = inds_c[ent_i];
     this->cell_at(ind_a + m_params.num_ghosts, ind_b + m_params.num_ghosts,
                   ind_c + m_params.num_ghosts)
-        .add_entity(ent_i, ent_pos);
+        .add_entity(ent_i, ent_pos, nlp.obj_types[ent_i]);
     if (ind_a >= m_params.num_ghosts && ind_a < m_params.a_upper &&
         ind_b >= m_params.num_ghosts && ind_b < m_params.b_upper &&
         ind_c >= m_params.num_ghosts && ind_c < m_params.c_upper) {
@@ -146,7 +149,7 @@ void CellList::update(const NeighbourListPacket &nlp) {
           this->cell_at(ind_a + a_shift * m_params.a + m_params.num_ghosts,
                         ind_b + b_shift * m_params.b + m_params.num_ghosts,
                         ind_c + c_shift * m_params.c + m_params.num_ghosts)
-              .add_entity(ent_i, ent_shift);
+              .add_entity(ent_i, ent_shift, nlp.obj_types[ent_i]);
         }
       }
     }
@@ -162,6 +165,14 @@ void CellList::cell_loop(const NeighbourCallback &callback) const {
       const Entity &ent1 = center_entities[i];
       for (size_t j = i + 1; j < center_entities.size(); ++j) {
         const Entity &ent2 = center_entities[j];
+        if (m_current_nlp.check_presence) {
+          std::bitset<8> bts[2] = {m_current_nlp.presence_tracker[ent1.idx],
+                                   m_current_nlp.presence_tracker[ent2.idx]};
+          bool is_cross_section = trajan::util::cross_section_fold<2>(2, bts);
+          if (!is_cross_section) {
+            continue;
+          }
+        }
         double rsq = ent1.square_distance(ent2);
         if (rsq <= m_cutoffsq) {
           callback(ent1, ent2, rsq);
@@ -173,6 +184,14 @@ void CellList::cell_loop(const NeighbourCallback &callback) const {
       auto neigh_entities = m_cells[neigh_idx].get_entities();
       for (const Entity &ent1 : center_entities) {
         for (const Entity &ent2 : neigh_entities) {
+          if (m_current_nlp.check_presence) {
+            std::bitset<8> bts[2] = {m_current_nlp.presence_tracker[ent1.idx],
+                                     m_current_nlp.presence_tracker[ent2.idx]};
+            bool is_cross_section = trajan::util::cross_section_fold<2>(2, bts);
+            if (!is_cross_section) {
+              continue;
+            }
+          }
           double rsq = ent1.square_distance(ent2);
           if (rsq <= m_cutoffsq) {
             callback(ent1, ent2, rsq);
@@ -197,14 +216,23 @@ size_t VerletList::determine_opt_num_threads() {
   return 1;
 }
 
-void VerletList::update(const NeighbourListPacket &np) { m_neighpack = np; }
+void VerletList::update(const NeighbourListPacket &nlp) { m_current_nlp = nlp; }
 
 void VerletList::verlet_loop(const NeighbourCallback &callback) const {
 #pragma omp parallel for collapse(2)
-  for (size_t i = 0; i < m_neighpack.size(); ++i) {
-    for (size_t j = i + 1; j < m_neighpack.size(); ++j) {
-      Vec3 ent_pos_i = m_neighpack.wrapped_cart_pos.col(i);
-      Vec3 ent_pos_j = m_neighpack.wrapped_cart_pos.col(j);
+  for (size_t i = 0; i < m_current_nlp.size(); ++i) {
+    for (size_t j = i + 1; j < m_current_nlp.size(); ++j) {
+      if (m_current_nlp.check_presence) {
+        std::bitset<8> bts[2] = {m_current_nlp.presence_tracker[i],
+                                 m_current_nlp.presence_tracker[j]};
+        bool is_cross_section = trajan::util::cross_section_fold<2>(2, bts);
+        if (!is_cross_section) {
+          continue;
+        }
+      }
+
+      Vec3 ent_pos_i = m_current_nlp.wrapped_cart_pos.col(i);
+      Vec3 ent_pos_j = m_current_nlp.wrapped_cart_pos.col(j);
       Vec3 dr = ent_pos_j - ent_pos_i;
       if (!m_unit_cell.dummy()) {
         Vec3 frac_dr = m_unit_cell.to_fractional(dr);
@@ -213,12 +241,100 @@ void VerletList::verlet_loop(const NeighbourCallback &callback) const {
       }
       double rsq = dr.squaredNorm();
       if (rsq <= m_cutoffsq) {
-        Entity ent_i(i, ent_pos_i);
-        Entity ent_j(j, ent_pos_j);
+        Entity ent_i(i, ent_pos_i, m_current_nlp.obj_types[i]);
+        Entity ent_j(j, ent_pos_j, m_current_nlp.obj_types[j]);
         callback(ent_i, ent_j, rsq);
       }
     }
   }
 };
+
+void NeighbourList::update(const std::vector<Atom> &atoms) {
+  size_t num_atoms = atoms.size();
+  Mat3N cart_pos(3, num_atoms);
+  std::vector<Entity::Type> obj_types(num_atoms, Entity::Type::Atom);
+  for (size_t i = 0; i < num_atoms; i++) {
+    const Atom &atom = atoms[i];
+    cart_pos(0, i) = atom.x;
+    cart_pos(1, i) = atom.y;
+    cart_pos(2, i) = atom.z;
+  }
+  UnitCell uc = m_impl->unit_cell();
+  auto result = trajan::core::wrap_coordinates(cart_pos, uc);
+  m_current_nlp = NeighbourListPacket(obj_types, result.second, result.first);
+
+  m_impl->update(m_current_nlp);
+}
+
+void NeighbourList::base_update(const std::vector<EntityType> &og_objects,
+                                Molecule::Origin o) {
+  if (!m_init) {
+    throw std::runtime_error("Need to init NeighbourList.");
+  }
+  if (!m_impl->unit_cell().init()) {
+    throw std::runtime_error("Using uninitialised UnitCell.");
+  }
+
+  size_t num_objects = og_objects.size();
+  Mat3N cart_pos(3, num_objects);
+  std::vector<Entity::Type> obj_types;
+  obj_types.clear();
+  obj_types.reserve(num_objects);
+  for (size_t i = 0; i < num_objects; i++) {
+    const EntityType &obj = og_objects[i];
+    std::visit(
+        [&](const auto &entity) {
+          using T = std::decay_t<decltype(entity)>;
+          if constexpr (std::is_same_v<T, Atom>) {
+            cart_pos(0, i) = entity.x;
+            cart_pos(1, i) = entity.y;
+            cart_pos(2, i) = entity.z;
+            obj_types.push_back(Entity::Type::Atom);
+          } else if constexpr (std::is_same_v<T, Molecule>) {
+            Vec3 O = {0, 0, 0};
+            switch (o) {
+            case Molecule::Cartesian:
+              throw std::runtime_error(
+                  "Can't use Cartesian origin for NeighbourList");
+            case Molecule::Centroid:
+              O = entity.centroid();
+              break;
+            case Molecule::CentreOfMass:
+              O = entity.centre_of_mass();
+              break;
+            }
+            cart_pos(0, i) = O.x();
+            cart_pos(1, i) = O.y();
+            cart_pos(2, i) = O.z();
+            obj_types.push_back(Entity::Type::Molecule);
+          }
+        },
+        obj);
+  }
+  trajan::log::debug("Number of cartesian positions from entities = {}",
+                     cart_pos.cols());
+  UnitCell uc = m_impl->unit_cell();
+  auto result = trajan::core::wrap_coordinates(cart_pos, uc);
+  m_current_nlp = NeighbourListPacket(obj_types, result.second, result.first);
+}
+
+void NeighbourList::update(const std::vector<EntityType> &og_objects,
+                           Molecule::Origin o) {
+  this->base_update(og_objects, o);
+  m_impl->update(m_current_nlp);
+}
+
+void NeighbourList::update(
+    const std::vector<std::vector<EntityType>> &og_objects_vec,
+    Molecule::Origin o) {
+  auto result = trajan::util::combine_deduplicate_map(
+      og_objects_vec, core::VariantHash(), core::VariantEqual());
+  std::vector<EntityType> deduplicated_entities = result.first;
+  std::vector<std::bitset<8>> presence_tracker = result.second;
+  this->base_update(deduplicated_entities, o);
+  m_current_nlp.presence_tracker = presence_tracker;
+  m_current_nlp.check_presence = true;
+  m_impl->update(m_current_nlp);
+}
 
 } // namespace trajan::core

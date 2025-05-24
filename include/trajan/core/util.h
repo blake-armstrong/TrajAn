@@ -218,6 +218,21 @@ combine_deduplicate_map(const std::vector<std::vector<T>> &vecs,
   return {result, presence_tracker};
 }
 
+template <size_t NumIndices>
+inline bool cross_section_fold(size_t num_sources, const std::bitset<8> *bts) {
+  std::bitset<8> combined;
+
+  [&]<std::size_t... I>(std::index_sequence<I...>) {
+    ((combined |= bts[I]), ...);
+  }(std::make_index_sequence<NumIndices>{});
+
+  for (size_t i = 0; i < num_sources; ++i) {
+    if (!combined.test(i))
+      return false;
+  }
+  return true;
+}
+
 // template <typename T, typename Hash = std::hash<T>,
 //           typename Equal = std::equal_to<T>>
 // static inline std::pair<std::vector<T>, std::vector<uint8_t>>

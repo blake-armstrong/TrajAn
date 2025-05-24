@@ -17,6 +17,20 @@ struct RDFOpts : trajan::util::Opts {
   std::optional<io::SelectionCriteria> parsed_sel1, parsed_sel2;
 };
 
+struct RDFResult {
+  std::vector<double> r;
+  std::vector<double> nofr;
+  std::vector<double> gofr;
+
+  RDFResult(size_t nbins) {
+    r.resize(nbins, 0.0);
+    nofr.resize(nbins, 0.0);
+    gofr.resize(nbins, 0.0);
+  }
+
+  void normalise_by_count(size_t count);
+};
+
 void run_rdf_subcommand(RDFOpts const &opts);
 CLI::App *add_rdf_subcommand(CLI::App &app);
 

@@ -5,7 +5,6 @@
 #include <memory>
 #include <string>
 #include <trajan/core/frame.h>
-#include <trajan/core/trajectory.h>
 #include <vector>
 
 namespace trajan::io {
@@ -56,8 +55,10 @@ void check_handlers(std::vector<FileHandlerPtr> &handlers);
 FileHandlerPtr read_input_file(const fs::path &file);
 std::vector<FileHandlerPtr>
 read_input_files(const std::vector<fs::path> &files);
+std::vector<FileHandlerPtr>
+read_input_files(const std::vector<std::string> &filenames);
 }; // namespace trajan::io
-
+// FIXME: remove from std namespace
 namespace std {
 template <> struct hash<trajan::io::FileType> {
   std::size_t operator()(const trajan::io::FileType &k) const {

@@ -1,7 +1,6 @@
+#include <string>
 #include <trajan/core/util.h>
 #include <trajan/io/selection.h>
-
-#include <string>
 
 namespace trajan::io {
 
@@ -37,14 +36,14 @@ SelectionParser::parse_selection(const std::string &input) {
       }
     }
 
-    // Sort and remove duplicates
     std::sort(values.begin(), values.end());
     values.erase(std::unique(values.begin(), values.end()), values.end());
 
-    if constexpr (std::is_same_v<SelectionType, IndexSelection>) {
-      return SelectionCriteria{IndexSelection{std::move(values)}};
-    } else if constexpr (std::is_same_v<SelectionType, MoleculeSelection>) {
-      return SelectionCriteria{MoleculeSelection{std::move(values)}};
+    if constexpr (std::is_same_v<SelectionType, AtomIndexSelection>) {
+      return SelectionCriteria{AtomIndexSelection{std::move(values)}};
+    } else if constexpr (std::is_same_v<SelectionType,
+                                        MoleculeIndexSelection>) {
+      return SelectionCriteria{MoleculeIndexSelection{std::move(values)}};
     } else if constexpr (std::is_same_v<SelectionType, AtomTypeSelection>) {
       return SelectionCriteria{AtomTypeSelection{std::move(values)}};
     }
@@ -61,12 +60,12 @@ SelectionParser::parse(const std::string &input) {
     return std::nullopt;
 
   switch (input[0]) {
-  case SelectionTraits<IndexSelection>::prefix:
-    return parse_selection<IndexSelection>(input.substr(1));
+  case SelectionTraits<AtomIndexSelection>::prefix:
+    return parse_selection<AtomIndexSelection>(input.substr(1));
   case SelectionTraits<AtomTypeSelection>::prefix:
     return parse_selection<AtomTypeSelection>(input.substr(1));
-  case SelectionTraits<MoleculeSelection>::prefix:
-    return parse_selection<MoleculeSelection>(input.substr(1));
+  case SelectionTraits<MoleculeIndexSelection>::prefix:
+    return parse_selection<MoleculeIndexSelection>(input.substr(1));
   default:
     return std::nullopt;
   }

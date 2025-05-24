@@ -13,34 +13,59 @@
 
 namespace trajan::core {
 
+// struct Entity {
+//   size_t idx;
+//   double x, y, z;
+//
+//   Entity(const size_t idx, const Vec3 &pos) {
+//     this->idx = idx;
+//     this->x = pos.x();
+//     this->y = pos.y();
+//     this->z = pos.z();
+//   }
+//   Entity(const Atom &atom) {
+//     this->idx = atom.index;
+//     this->x = atom.x;
+//     this->y = atom.y;
+//     this->z = atom.z;
+//   }
+//   Entity(const Molecule &molecule) {
+//     this->idx = molecule.index;
+//     this->x = molecule.x;
+//     this->y = molecule.y;
+//     this->z = molecule.z;
+//   }
+//
+//   inline Vec3 position() const { return {this->x, this->y, this->z}; }
+//
+//   inline double square_distance(const Entity &other) const {
+//     double dx = other.x - x, dy = other.y - y, dz = other.z - z;
+//     return dx * dx + dy * dy + dz * dz;
+//   }
+// };
+
 struct Entity {
   size_t idx;
   double x, y, z;
+  enum class Type { Atom, Molecule } type;
 
-  Entity(const size_t idx, const Vec3 &pos) {
-    this->idx = idx;
-    this->x = pos.x();
-    this->y = pos.y();
-    this->z = pos.z();
-  }
-  Entity(const Atom &atom) {
-    this->idx = atom.index;
-    this->x = atom.x;
-    this->y = atom.y;
-    this->z = atom.z;
-  }
-  Entity(const Molecule &molecule) {
-    this->idx = molecule.index;
-    this->x = molecule.x;
-    this->y = molecule.y;
-    this->z = molecule.z;
-  }
+  Entity(size_t idx, const Vec3 &pos, Type t)
+      : idx(idx), x(pos.x()), y(pos.y()), z(pos.z()), type(t) {}
+  Entity(const Atom &atom)
+      : idx(atom.index), x(atom.x), y(atom.y), z(atom.z), type(Type::Atom) {}
+  Entity(const Molecule &molecule)
+      : idx(molecule.index), x(molecule.x), y(molecule.y), z(molecule.z),
+        type(Type::Molecule) {}
 
-  inline Vec3 position() const { return {this->x, this->y, this->z}; }
-
+  inline Vec3 position() const { return {x, y, z}; }
   inline double square_distance(const Entity &other) const {
     double dx = other.x - x, dy = other.y - y, dz = other.z - z;
     return dx * dx + dy * dy + dz * dz;
+  }
+
+  bool operator==(const Atom &atom) const { return type == Type::Atom; }
+  bool operator==(const Molecule &molecule) const {
+    return type == Type::Molecule;
   }
 };
 
@@ -73,44 +98,44 @@ struct VariantEqual {
   }
 };
 
-using Entities = std::vector<EntityType>;
-
 struct NeighbourListPacket {
-  Entities entities;
   Mat3N wrapped_cart_pos;
   Mat3N wrapped_frac_pos;
+  std::vector<Entity::Type> obj_types;
+  std::vector<std::bitset<8>> presence_tracker;
+  bool check_presence{false};
 
   NeighbourListPacket() = default;
-  NeighbourListPacket(const Entities &ents, const Mat3N &cart_pos,
-                      const Mat3N &frac_pos) {
-    this->entities = ents;
+  NeighbourListPacket(const std::vector<Entity::Type> &obj_types,
+                      const Mat3N &cart_pos, const Mat3N &frac_pos) {
     this->wrapped_cart_pos = cart_pos;
     this->wrapped_frac_pos = frac_pos;
+    this->obj_types = obj_types;
     this->check();
   }
 
-  size_t size() const { return entities.size(); }
+  size_t size() const { return obj_types.size(); }
 
   void check() const {
     if (this->wrapped_cart_pos.size() != this->wrapped_frac_pos.size()) {
       throw std::runtime_error(
           "Cartesian and fractional positions must be the same size");
     };
-    if (this->wrapped_cart_pos.cols() != this->entities.size()) {
+    if (this->wrapped_cart_pos.cols() != this->obj_types.size()) {
       throw std::runtime_error(
           "Entities vector and position matrix not same size.");
     };
   }
 
-  void print() const {
-    for (size_t i = 0; i < entities.size(); i++) {
-      trajan::log::debug(fmt::format(
-          "NLP: {:>6} {:>8.3f} {:>8.3f} {:>8.3f} {:>8.3f} {:>8.3f} {:>8.3f}", i,
-          wrapped_cart_pos.col(i).x(), wrapped_cart_pos.col(i).y(),
-          wrapped_cart_pos.col(i).z(), wrapped_frac_pos.col(i).x(),
-          wrapped_frac_pos.col(i).y(), wrapped_frac_pos.col(i).z()));
-    }
-  }
+  // void print() const {
+  //   for (size_t i = 0; i < entities.size(); i++) {
+  //     trajan::log::debug(fmt::format(
+  //         "NLP: {:>6} {:>8.3f} {:>8.3f} {:>8.3f} {:>8.3f} {:>8.3f} {:>8.3f}",
+  //         i, wrapped_cart_pos.col(i).x(), wrapped_cart_pos.col(i).y(),
+  //         wrapped_cart_pos.col(i).z(), wrapped_frac_pos.col(i).x(),
+  //         wrapped_frac_pos.col(i).y(), wrapped_frac_pos.col(i).z()));
+  //   }
+  // }
 };
 
 using NeighbourCallback =
@@ -148,8 +173,8 @@ class CellList; // forward declaration
 class Cell {
 public:
   inline void add_entity(const Entity &entity) { m_entities.push_back(entity); }
-  inline void add_entity(const size_t idx, Vec3 &pos) {
-    m_entities.emplace_back(idx, pos);
+  inline void add_entity(const size_t idx, Vec3 &pos, Entity::Type type) {
+    m_entities.emplace_back(idx, pos, type);
   }
   const std::vector<Entity> &get_entities() const { return m_entities; }
   void clear() { m_entities.clear(); }
@@ -209,6 +234,7 @@ private:
   static constexpr size_t CELLDIVISOR = 2;
   static constexpr size_t GHOSTCELLS = CELLDIVISOR;
 
+  NeighbourListPacket m_current_nlp;
   bool m_dummy{false};
   CellListParameters m_params;
   std::vector<Cell> m_cells;
@@ -254,7 +280,7 @@ public:
   }
 
 private:
-  NeighbourListPacket m_neighpack;
+  NeighbourListPacket m_current_nlp;
   size_t determine_opt_num_threads();
   void verlet_loop(const NeighbourCallback &callback) const;
 };
@@ -279,15 +305,11 @@ public:
     m_init = true;
   }
 
-  void update(const NeighbourListPacket &nlp) {
-    if (!m_init) {
-      throw std::runtime_error("Need to init NeighbourList.");
-    }
-    if (!m_impl->unit_cell().init()) {
-      throw std::runtime_error("Using unitialised UnitCell.");
-    }
-    m_impl->update(nlp);
-  }
+  void update(const std::vector<Atom> &atoms);
+  void update(const std::vector<EntityType> &og_objects,
+              Molecule::Origin o = Molecule::CentreOfMass);
+  void update(const std::vector<std::vector<EntityType>> &og_objects_vec,
+              Molecule::Origin o = Molecule::CentreOfMass);
 
   void iterate_neighbours(const NeighbourCallback &callback) {
     m_impl->iterate_neighbours(callback);
@@ -300,8 +322,13 @@ public:
   }
 
 private:
+  std::vector<EntityType> m_original_objects;
+  NeighbourListPacket m_current_nlp;
   std::unique_ptr<NeighbourListBase> m_impl;
   bool m_init{false};
+
+  void base_update(const std::vector<EntityType> &og_objects,
+                   Molecule::Origin o);
 };
 
 }; // namespace trajan::core

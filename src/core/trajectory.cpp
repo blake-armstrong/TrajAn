@@ -1,14 +1,79 @@
-#include "trajan/core/unit_cell.h"
+#include <optional>
 #include <stdexcept>
 #include <trajan/core/graph.h>
 #include <trajan/core/log.h>
 #include <trajan/core/molecule.h>
 #include <trajan/core/neigh.h>
 #include <trajan/core/trajectory.h>
+#include <trajan/core/unit_cell.h>
+#include <trajan/io/file_handler.h>
 #include <trajan/io/selection.h>
 #include <vector>
 
 namespace trajan::core {
+
+Trajectory::~Trajectory() {
+  for (auto &handler : m_handlers) {
+    if (handler) {
+      handler->finalise();
+    }
+  }
+}
+
+void Trajectory::load_files(const std::vector<fs::path> &files) {
+  m_handlers = io::read_input_files(files);
+
+  if (m_handlers.empty()) {
+    throw std::runtime_error("Could not load files.");
+  }
+
+  m_handlers[0]->initialise();
+}
+
+bool Trajectory::next_frame() {
+  if (m_handlers.empty()) {
+    return false;
+  }
+
+  if (m_current_handler_index >= m_handlers.size()) {
+    throw std::runtime_error("Incorrect index.");
+  }
+  if (m_handlers[m_current_handler_index]->read_frame(m_frame)) {
+    m_frame_loaded = true;
+    m_current_frame_index++;
+    return true;
+  }
+
+  m_handlers[m_current_handler_index]->finalise();
+  m_current_handler_index++;
+
+  while (m_current_handler_index < m_handlers.size()) {
+    if (m_handlers[m_current_handler_index]->initialise()) {
+      if (m_handlers[m_current_handler_index]->read_frame(m_frame)) {
+        m_frame_loaded = true;
+        m_current_frame_index++;
+        return true;
+      }
+    }
+    m_handlers[m_current_handler_index]->finalise();
+    m_current_handler_index++;
+  }
+  m_frame_loaded = false;
+
+  return false;
+}
+
+void Trajectory::reset() {
+  for (auto &handler : m_handlers) {
+    if (handler) {
+      handler->finalise();
+    }
+  }
+
+  m_current_handler_index = 0;
+  m_current_frame_index = 0;
+  m_frame_loaded = false;
+}
 
 void Trajectory::update_neigh_uc(const UnitCell &unit_cell) {
   // TODO: compare with current uc to see if it needs updating
@@ -34,26 +99,20 @@ void Trajectory::update_neigh(const UnitCell &unit_cell, double rcut,
   m_topo_neigh_list = NeighbourList(unit_cell, rcut, threads);
 }
 
-Entities Trajectory::get_entities() {
-  std::vector<Atom> atoms = this->atoms();
-  Entities entities;
-  entities.reserve(atoms.size());
-  for (Atom &atom : atoms) {
-    entities.push_back(atom);
+std::vector<EntityType>
+Trajectory::get_entities(const io::SelectionCriteria &selection) {
+  if (!m_frame_loaded) {
+    throw std::runtime_error("No frame loaded. Call next_frame() first.");
   }
-  return entities;
-}
-
-Entities Trajectory::get_entities(const io::SelectionCriteria &selection) {
-  // using SelType = std::decay_t<decltype(selection)>;
   std::vector<Atom> atoms = this->atoms();
   std::vector<Molecule> molecules;
-  Entities entities;
+  std::vector<EntityType> entities;
   entities.reserve(atoms.size());
 
   trajan::log::debug("Processing selection {}", selection.index());
 
-  if (std::holds_alternative<io::MoleculeSelection>(selection)) {
+  if (std::holds_alternative<io::MoleculeIndexSelection>(selection) ||
+      std::holds_alternative<io::MoleculeTypeSelection>(selection)) {
     // build molecules
     molecules = this->unit_cell_molecules();
   }
@@ -61,8 +120,6 @@ Entities Trajectory::get_entities(const io::SelectionCriteria &selection) {
   entities = std::visit(
       [&](const auto &sel) {
         using ActualType = std::decay_t<decltype(sel)>;
-        trajan::log::debug("Actual selection type: {}",
-                           typeid(ActualType).name());
         return io::process_selection<ActualType>(sel, atoms, molecules,
                                                  entities);
       },
@@ -78,73 +135,15 @@ Entities Trajectory::get_entities(const io::SelectionCriteria &selection) {
   return entities;
 }
 
-// Entities
-// Trajectory::get_entities(const std::vector<io::SelectionCriteria>
-// &selections) {
-//   Entities entities;
-//   for (const io::SelectionCriteria &sel : selections) {
-//     Entities e2 = this->get_entities(sel);
-//     entities.reserve(entities.size() + e2.size());
-//     entities.insert(entities.end(), e2.begin(), e2.end());
-//   }
-//   return entities;
-// }
-
-NeighbourListPacket
-Trajectory::get_neighpack_from_entities(const Entities &entities,
-                                        Molecule::Origin o) {
-  NeighbourListPacket nlp;
-  bool all_atoms =
-      std::all_of(entities.begin(), entities.end(), [](const auto &entity) {
-        return std::holds_alternative<Atom>(entity);
-      });
-  trajan::log::debug("Only atoms in entities: {}", all_atoms);
-  if ((all_atoms) && (this->num_atoms() == entities.size())) {
-    trajan::log::debug("Number of entities {} == number of atoms {}",
-                       entities.size(), this->num_atoms());
-    Frame &frame = this->frame();
-    return NeighbourListPacket(entities, frame.wrapped_cart_pos(),
-                               frame.frac_pos());
+std::vector<EntityType>
+Trajectory::get_entities(const std::vector<io::SelectionCriteria> &selections) {
+  std::vector<EntityType> entities;
+  for (const io::SelectionCriteria &sel : selections) {
+    std::vector<EntityType> e2 = this->get_entities(sel);
+    entities.reserve(entities.size() + e2.size());
+    entities.insert(entities.end(), e2.begin(), e2.end());
   }
-
-  size_t e_size = entities.size();
-  Mat3N cart_pos(3, e_size);
-  for (size_t i = 0; i < e_size; i++) {
-    const EntityType &ent = entities[i];
-    std::visit(
-        [&cart_pos, &o, i](const auto &entity) {
-          using T = std::decay_t<decltype(entity)>;
-          if constexpr (std::is_same_v<T, Atom>) {
-            cart_pos(0, i) = entity.x;
-            cart_pos(1, i) = entity.y;
-            cart_pos(2, i) = entity.z;
-          } else if constexpr (std::is_same_v<T, Molecule>) {
-            Vec3 O = {0, 0, 0};
-            switch (o) {
-            case Molecule::Cartesian:
-              throw std::runtime_error(
-                  "Can't use Cartesian origin for NeighbourList");
-            case Molecule::Centroid:
-              O = entity.centroid();
-              break;
-            case Molecule::CentreOfMass:
-              O = entity.centre_of_mass();
-              break;
-            }
-            cart_pos(0, i) = O.x();
-            cart_pos(1, i) = O.y();
-            cart_pos(2, i) = O.z();
-          }
-        },
-        ent);
-  }
-  trajan::log::debug("Number of cartesian positions from entities = {}",
-                     cart_pos.cols());
-  UnitCell uc = this->unit_cell();
-  auto result = trajan::core::wrap_coordinates(cart_pos, uc);
-  Mat3N frac_pos = result.first;
-  Mat3N wrapped_cart_pos = result.second;
-  return NeighbourListPacket(entities, wrapped_cart_pos, frac_pos);
+  return entities;
 }
 
 void Trajectory::update_bond_graph() {
@@ -167,32 +166,32 @@ void Trajectory::update_unit_cell_connectivity() {
   this->update_neigh();
   this->update_bond_graph();
 
-  Entities ents = this->get_entities();
-  NeighbourListPacket nlp = this->get_neighpack_from_entities(ents);
-  m_topo_neigh_list.update(nlp);
+  m_topo_neigh_list.update(this->atoms());
 
   // TODO: allow user input tolerance
   double tol = 0.4;
-  BondGraph &bg = this->m_bond_graph;
-  // TODO: make neighbourcallback func more generic
-  //  to allow passing Atom instead of Entity to
-  //  prevent the std::visit call every iteration
-  NeighbourCallback func = [&ents, &bg, tol](const Entity &ent1,
-                                             const Entity &ent2, double rsq) {
-    const auto &ntt1 = ents[ent1.idx];
-    const auto &ntt2 = ents[ent2.idx];
-    std::visit(
-        [rsq, &bg, tol](const auto &e1, const auto &e2) {
-          using T1 = std::decay_t<decltype(e1)>;
-          using T2 = std::decay_t<decltype(e2)>;
-          if constexpr (std::is_same_v<T1, Atom> && std::is_same_v<T2, Atom>) {
-            std::optional<Bond> bond = e1.is_bonded_with_rsq(e2, rsq, tol);
-            if (bond) {
-              bg.add_edge(e1.index, e2.index, *bond);
-            }
-          }
-        },
-        ntt1, ntt2);
+  const std::vector<Atom> &atoms = this->atoms();
+  NeighbourCallback func = [&](const Entity &ent1, const Entity &ent2,
+                               double rsq) {
+    const Atom &atom1 = atoms[ent1.idx];
+    const Atom &atom2 = atoms[ent2.idx];
+    // std::visit(
+    //     [rsq, &bg, tol](const auto &e1, const auto &e2) {
+    //       using T1 = std::decay_t<decltype(e1)>;
+    //       using T2 = std::decay_t<decltype(e2)>;
+    //       if constexpr (std::is_same_v<T1, Atom> && std::is_same_v<T2, Atom>)
+    //       {
+    //         std::optional<Bond> bond = e1.is_bonded_with_rsq(e2, rsq, tol);
+    //         if (bond) {
+    //           bg.add_edge(e1.index, e2.index, *bond);
+    //         }
+    //       }
+    //     },
+    //     ntt1, ntt2);
+    std::optional<Bond> bond = atom1.is_bonded_with_rsq(atom2, rsq, tol);
+    if (bond) {
+      m_bond_graph.add_edge(atom1.index, atom2.index, *bond);
+    }
   };
 
   this->m_topo_neigh_list.iterate_neighbours(func);

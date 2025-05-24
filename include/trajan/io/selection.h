@@ -16,7 +16,13 @@ namespace trajan::io {
 using Atom = trajan::core::Atom;
 using Molecule = trajan::core::Molecule;
 
-template <typename T> struct Selection {
+struct SelectionBase {
+  virtual std::string name() const = 0;
+  virtual ~SelectionBase() = default;
+};
+
+template <typename T> struct Selection : public SelectionBase {
+  Selection(std::vector<T> d) { data = std::move(d); }
   std::vector<T> data;
 
   auto begin() { return data.begin(); }
@@ -26,18 +32,33 @@ template <typename T> struct Selection {
   auto end() const { return data.end(); }
 };
 
-struct IndexSelection : public Selection<int> {};
+struct AtomIndexSelection : public Selection<int> {
+  using Selection<int>::Selection;
+  std::string name() const override { return "AtomIndexSelection"; }
+};
 
-struct AtomTypeSelection : public Selection<std::string> {};
+struct AtomTypeSelection : public Selection<std::string> {
+  using Selection<std::string>::Selection;
+  std::string name() const override { return "AtomTypeSelection"; }
+};
 
-struct MoleculeSelection : public Selection<int> {};
+struct MoleculeIndexSelection : public Selection<int> {
+  using Selection<int>::Selection;
+  std::string name() const override { return "MoleculeIndexSelection"; }
+};
+
+struct MoleculeTypeSelection : public Selection<std::string> {
+  using Selection<std::string>::Selection;
+  std::string name() const override { return "MoleculeTypeSelection"; }
+};
 
 using SelectionCriteria =
-    std::variant<IndexSelection, AtomTypeSelection, MoleculeSelection>;
+    std::variant<AtomIndexSelection, AtomTypeSelection, MoleculeIndexSelection,
+                 MoleculeTypeSelection>;
 
 template <typename T> struct SelectionTraits {};
 
-template <> struct SelectionTraits<IndexSelection> {
+template <> struct SelectionTraits<AtomIndexSelection> {
   using value_type = int;
   static constexpr bool allows_ranges = true;
   static constexpr char prefix = 'i';
@@ -45,17 +66,17 @@ template <> struct SelectionTraits<IndexSelection> {
   static std::optional<value_type> validate(const std::string &token) {
     try {
       int value = std::stoi(token);
-      return value; // Allow any integer
+      return value;
     } catch (...) {
       return std::nullopt;
     }
   }
 };
 
-template <> struct SelectionTraits<MoleculeSelection> {
+template <> struct SelectionTraits<MoleculeIndexSelection> {
   using value_type = int;
   static constexpr bool allows_ranges = true;
-  static constexpr char prefix = 'm';
+  static constexpr char prefix = 'j';
 
   static std::optional<value_type> validate(const std::string &token) {
     try {
@@ -70,7 +91,22 @@ template <> struct SelectionTraits<MoleculeSelection> {
 template <> struct SelectionTraits<AtomTypeSelection> {
   using value_type = std::string;
   static constexpr bool allows_ranges = false;
-  static constexpr char prefix = 't';
+  static constexpr char prefix = 'a';
+
+  static std::optional<value_type> validate(const std::string &token) {
+    if (std::all_of(token.begin(), token.end(), [](char c) {
+          return std::isalnum(c) || c == '_' || c == '*';
+        })) {
+      return token;
+    }
+    return std::nullopt;
+  }
+};
+
+template <> struct SelectionTraits<MoleculeTypeSelection> {
+  using value_type = std::string;
+  static constexpr bool allows_ranges = false;
+  static constexpr char prefix = 'm';
 
   static std::optional<value_type> validate(const std::string &token) {
     if (std::all_of(token.begin(), token.end(), [](char c) {
@@ -110,23 +146,20 @@ private:
 };
 
 template <typename SelectionType>
-core::Entities
+std::vector<core::EntityType>
 process_selection(const SelectionType &selection, std::vector<Atom> &atoms,
-                  std::vector<Molecule> &molecules, core::Entities &entities) {
-  trajan::log::debug("Processing selection of type {}",
-                     typeid(SelectionType).name());
-  if constexpr (std::is_same_v<SelectionType, io::IndexSelection>) {
-    trajan::log::debug("Identified IndexSelection.");
-
+                  std::vector<Molecule> &molecules,
+                  std::vector<core::EntityType> &entities) {
+  trajan::log::debug("Processing selection of type {}", selection.name());
+  if constexpr (std::is_same_v<SelectionType, io::AtomIndexSelection>) {
     for (Atom &atom : atoms) {
-      for (const int &idx : selection) {
-        if (atom.index == idx) {
+      for (const int &ai : selection) {
+        if (atom.index == ai) {
           entities.push_back(atom);
         }
       }
     }
   } else if constexpr (std::is_same_v<SelectionType, io::AtomTypeSelection>) {
-    trajan::log::debug("Identified AtomTypeSelection.");
     for (Atom &atom : atoms) {
       for (const std::string &at : selection) {
         if (atom.type == at) {
@@ -134,8 +167,8 @@ process_selection(const SelectionType &selection, std::vector<Atom> &atoms,
         }
       }
     }
-  } else if constexpr (std::is_same_v<SelectionType, io::MoleculeSelection>) {
-    trajan::log::debug("Identified MoleculeSelection.");
+  } else if constexpr (std::is_same_v<SelectionType,
+                                      io::MoleculeIndexSelection>) {
 
     for (Molecule &molecule : molecules) {
       for (const int &mi : selection) {
@@ -144,6 +177,17 @@ process_selection(const SelectionType &selection, std::vector<Atom> &atoms,
         }
       }
     }
+  } else if constexpr (std::is_same_v<SelectionType,
+                                      io::MoleculeTypeSelection>) {
+    for (Molecule &molecule : molecules) {
+      for (const std::string &mt : selection) {
+        if (molecule.type == mt) {
+          entities.push_back(molecule);
+        }
+      }
+    }
+  } else {
+    throw std::runtime_error("Unknown type.");
   }
   return entities;
 }

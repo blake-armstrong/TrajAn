@@ -132,4 +132,13 @@ read_input_files(const std::vector<fs::path> &files) {
   return handlers;
 }
 
+std::vector<FileHandlerPtr>
+read_input_files(const std::vector<std::string> &filenames) {
+  std::vector<fs::path> files;
+  for (auto filename : filenames) {
+    files.push_back(filename);
+  }
+  return read_input_files(files);
+}
+
 } // namespace trajan::io

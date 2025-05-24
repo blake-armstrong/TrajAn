@@ -4,7 +4,6 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/matchers/catch_matchers_vector.hpp>
 #include <chrono>
-#include <iostream>
 #include <omp.h>
 #include <random>
 #include <trajan/core/element.h>
@@ -22,18 +21,17 @@ using trajan::Vec3;
 using trajan::core::Atom;
 using trajan::core::Cell;
 using trajan::core::CellList;
-using trajan::core::Entities;
+using trajan::core::Entity;
 using trajan::core::Frame;
 using trajan::core::Molecule;
-using trajan::core::NeighbourListPacket;
 using trajan::core::Trajectory;
 using trajan::core::UnitCell;
 using trajan::core::VariantEqual;
 using trajan::core::VariantHash;
-using trajan::core::wrap_coordinates;
 using trajan::core::element::Element;
 using trajan::io::SelectionCriteria;
 using trajan::io::SelectionParser;
+using Entities = std::vector<trajan::core::EntityType>;
 
 namespace units = trajan::units;
 
@@ -150,35 +148,28 @@ TEST_CASE("CellList vs Double Loop Comparison", "[cell_list]") {
   const int num_atoms = 3000;
   const double cutoff = 5.0;
   const int num_threads = 1;
-  trajan::core::Entities entities;
-  entities.reserve(num_atoms);
+  std::vector<Atom> atoms;
+  atoms.reserve(num_atoms);
   std::random_device rd;
   std::mt19937 gen(42);
 
-  SECTION("Comparing pair counting between methods no wrapping") {
+  SECTION("Comparing pair counting between methods inside box only atoms") {
     std::uniform_real_distribution<> dis(0, box_size);
 
     // create atoms with random positions
-    Mat3N atoms_pos(3, num_atoms);
     for (int i = 0; i < num_atoms; ++i) {
       Vec3 position(dis(gen), dis(gen), dis(gen));
       Atom atom(position, 0, i);
-      entities.push_back(atom);
-      atoms_pos(0, i) = position.x();
-      atoms_pos(1, i) = position.y();
-      atoms_pos(2, i) = position.z();
+      atoms.push_back(atom);
     }
-    Mat3N frac_pos = unit_cell.to_fractional(atoms_pos);
 
-    trajan::core::NeighbourListPacket nlp(entities, atoms_pos, frac_pos);
     std::atomic<size_t> cell_list_pairs{0};
     std::atomic<size_t> verlet_list_pairs{0};
 
     trajan::core::NeighbourList neighbour_list(unit_cell, cutoff, num_threads);
     double cell_list_time = measure_execution_time([&]() {
-      neighbour_list.update(nlp);
-      neighbour_list.iterate_neighbours([&](const trajan::core::Entity &e1,
-                                            const trajan::core::Entity &e2,
+      neighbour_list.update(atoms);
+      neighbour_list.iterate_neighbours([&](const Entity &e1, const Entity &e2,
                                             double rsq) { cell_list_pairs++; });
     });
 
@@ -186,10 +177,11 @@ TEST_CASE("CellList vs Double Loop Comparison", "[cell_list]") {
         trajan::core::NeighbourList(unit_cell, cutoff, num_threads,
                                     trajan::core::NeighbourList::Type::Verlet);
     double verlet_list_time = measure_execution_time([&]() {
-      neighbour_list.update(nlp);
+      neighbour_list.update(atoms);
       neighbour_list.iterate_neighbours(
-          [&](const trajan::core::Entity &e1, const trajan::core::Entity &e2,
-              double rsq) { verlet_list_pairs++; });
+          [&](const Entity &e1, const Entity &e2, double rsq) {
+            verlet_list_pairs++;
+          });
     });
 
     INFO("System size: " << num_atoms << " atoms");
@@ -211,32 +203,24 @@ TEST_CASE("CellList vs Double Loop Comparison", "[cell_list]") {
     INFO("Speed-up factor: " << verlet_list_time / cell_list_time);
     REQUIRE(verlet_list_time > cell_list_time);
   }
-  SECTION("Comparing pair counting between methods no wrapping") {
+  SECTION("Comparing pair counting between methods outside box only atoms") {
     std::uniform_real_distribution<> dis(-5, box_size - 5);
 
+    atoms.clear();
+    atoms.reserve(num_atoms);
     // create atoms with random positions
-    Mat3N atoms_pos(3, num_atoms);
     for (int i = 0; i < num_atoms; ++i) {
       Vec3 position(dis(gen), dis(gen), dis(gen));
       Atom atom(position, 0, i);
-      entities.push_back(atom);
-      atoms_pos(0, i) = position.x();
-      atoms_pos(1, i) = position.y();
-      atoms_pos(2, i) = position.z();
+      atoms.push_back(atom);
     }
-    // Mat3N frac_pos = unit_cell.to_fractional(atoms_pos);
-    auto result = wrap_coordinates(atoms_pos, unit_cell);
-
-    trajan::core::NeighbourListPacket nlp(entities, result.second,
-                                          result.first);
     std::atomic<size_t> cell_list_pairs{0};
     std::atomic<size_t> verlet_list_pairs{0};
 
     trajan::core::NeighbourList neighbour_list(unit_cell, cutoff, num_threads);
     double cell_list_time = measure_execution_time([&]() {
-      neighbour_list.update(nlp);
-      neighbour_list.iterate_neighbours([&](const trajan::core::Entity &e1,
-                                            const trajan::core::Entity &e2,
+      neighbour_list.update(atoms);
+      neighbour_list.iterate_neighbours([&](const Entity &e1, const Entity &e2,
                                             double rsq) { cell_list_pairs++; });
     });
 
@@ -244,10 +228,11 @@ TEST_CASE("CellList vs Double Loop Comparison", "[cell_list]") {
         trajan::core::NeighbourList(unit_cell, cutoff, num_threads,
                                     trajan::core::NeighbourList::Type::Verlet);
     double verlet_list_time = measure_execution_time([&]() {
-      neighbour_list.update(nlp);
+      neighbour_list.update(atoms);
       neighbour_list.iterate_neighbours(
-          [&](const trajan::core::Entity &e1, const trajan::core::Entity &e2,
-              double rsq) { verlet_list_pairs++; });
+          [&](const Entity &e1, const Entity &e2, double rsq) {
+            verlet_list_pairs++;
+          });
     });
 
     INFO("System size: " << num_atoms << " atoms");
@@ -270,7 +255,69 @@ TEST_CASE("CellList vs Double Loop Comparison", "[cell_list]") {
     REQUIRE(verlet_list_time > cell_list_time);
   }
 }
-TEST_CASE("CellList vs Double Loop Comparison inside Trajectory",
+TEST_CASE("CellList vs Double Loop Comparison using entities", "[cell_list]") {
+  const double box_size = 50.0;
+  const int num_atoms = 3000;
+  const double cutoff = 5.0;
+  const int num_threads = 1;
+  std::random_device rd;
+  std::mt19937 gen(42);
+  std::uniform_real_distribution<> dis(0, box_size);
+
+  UnitCell unit_cell = trajan::core::cubic_cell(box_size);
+
+  // create atoms with random positions
+  Entities entities;
+  entities.reserve(num_atoms);
+  for (int i = 0; i < num_atoms; ++i) {
+    Vec3 position(dis(gen), dis(gen), dis(gen));
+    Atom atom(position, 0, i);
+    entities.push_back(atom);
+  }
+
+  SECTION("Comparing pair counting between methods using entities") {
+    std::atomic<size_t> cell_list_pairs{0};
+    std::atomic<size_t> verlet_list_pairs{0};
+
+    trajan::core::NeighbourList neighbour_list(unit_cell, cutoff, num_threads);
+    double cell_list_time = measure_execution_time([&]() {
+      neighbour_list.update(entities);
+      neighbour_list.iterate_neighbours([&](const Entity &e1, const Entity &e2,
+                                            double rsq) { cell_list_pairs++; });
+    });
+
+    neighbour_list =
+        trajan::core::NeighbourList(unit_cell, cutoff, num_threads,
+                                    trajan::core::NeighbourList::Type::Verlet);
+    double verlet_list_time = measure_execution_time([&]() {
+      neighbour_list.update(entities);
+      neighbour_list.iterate_neighbours(
+          [&](const Entity &e1, const Entity &e2, double rsq) {
+            verlet_list_pairs++;
+          });
+    });
+
+    INFO("System size: " << num_atoms << " atoms");
+    INFO("Box size: " << box_size << "x" << box_size << "x" << box_size);
+    INFO("Cutoff distance: " << cutoff);
+    INFO("Number of threads: " << num_threads);
+    double volume = box_size * box_size * box_size;
+    double expected_pairs_per_atom =
+        (4.0 / 3.0) * units::PI * std::pow(cutoff, 3) / volume * num_atoms;
+    double total_expected_pairs = expected_pairs_per_atom * num_atoms / 2;
+    INFO("Expected approximate number of pairs: ~" << total_expected_pairs);
+    INFO("Pairs found (cell list): " << cell_list_pairs);
+    INFO("Pairs found (double loop): " << verlet_list_pairs);
+    REQUIRE(cell_list_pairs == verlet_list_pairs);
+    REQUIRE(static_cast<double>(cell_list_pairs) > total_expected_pairs * 0.8);
+    REQUIRE(static_cast<double>(cell_list_pairs) < total_expected_pairs * 1.2);
+    INFO("Cell list execution time: " << cell_list_time << " seconds");
+    INFO("Verlet list execution time: " << verlet_list_time << " seconds");
+    INFO("Speed-up factor: " << verlet_list_time / cell_list_time);
+    REQUIRE(verlet_list_time > cell_list_time);
+  }
+}
+TEST_CASE("CellList vs Double Loop Comparison using entities in Trajectory",
           "[cell_list]") {
   const double box_size = 50.0;
   const int num_atoms = 3000;
@@ -287,25 +334,22 @@ TEST_CASE("CellList vs Double Loop Comparison inside Trajectory",
 
   // create atoms with random positions
   std::vector<Atom> atoms;
+  atoms.reserve(num_atoms);
   for (int i = 0; i < num_atoms; ++i) {
     Vec3 position(dis(gen), dis(gen), dis(gen));
-    atoms.emplace_back(position, 0, i);
+    Atom atom(position, 0, i);
+    atoms.push_back(atom);
   }
   frame.set_atoms(atoms);
 
-  Entities entities = trajectory.get_entities();
-  INFO("Number of entities: " << entities.size());
-  NeighbourListPacket nlp = trajectory.get_neighpack_from_entities(entities);
-
-  SECTION("Comparing pair counting between methods") {
+  SECTION("Comparing pair counting between methods using entities") {
     std::atomic<size_t> cell_list_pairs{0};
     std::atomic<size_t> verlet_list_pairs{0};
 
     trajan::core::NeighbourList neighbour_list(unit_cell, cutoff, num_threads);
     double cell_list_time = measure_execution_time([&]() {
-      neighbour_list.update(nlp);
-      neighbour_list.iterate_neighbours([&](const trajan::core::Entity &e1,
-                                            const trajan::core::Entity &e2,
+      neighbour_list.update(trajectory.atoms());
+      neighbour_list.iterate_neighbours([&](const Entity &e1, const Entity &e2,
                                             double rsq) { cell_list_pairs++; });
     });
 
@@ -313,10 +357,11 @@ TEST_CASE("CellList vs Double Loop Comparison inside Trajectory",
         trajan::core::NeighbourList(unit_cell, cutoff, num_threads,
                                     trajan::core::NeighbourList::Type::Verlet);
     double verlet_list_time = measure_execution_time([&]() {
-      neighbour_list.update(nlp);
+      neighbour_list.update(trajectory.atoms());
       neighbour_list.iterate_neighbours(
-          [&](const trajan::core::Entity &e1, const trajan::core::Entity &e2,
-              double rsq) { verlet_list_pairs++; });
+          [&](const Entity &e1, const Entity &e2, double rsq) {
+            verlet_list_pairs++;
+          });
     });
 
     INFO("System size: " << num_atoms << " atoms");
@@ -339,6 +384,7 @@ TEST_CASE("CellList vs Double Loop Comparison inside Trajectory",
     REQUIRE(verlet_list_time > cell_list_time);
   }
 }
+
 TEST_CASE("CellList vs Double Loop Comparison inside Trajectory with selection",
           "[cell_list]") {
   const double box_size = 50.0;
@@ -369,13 +415,12 @@ TEST_CASE("CellList vs Double Loop Comparison inside Trajectory with selection",
     atoms.push_back(atom);
   }
   frame.set_atoms(atoms);
-  std::string sel = "tO2";
+  std::string sel = "aO2";
   std::optional<SelectionCriteria> result = SelectionParser::parse(sel);
   REQUIRE(result);
   SelectionCriteria sc = *result;
   Entities entities = trajectory.get_entities(sc);
   size_t entities_size = entities.size();
-  NeighbourListPacket nlp = trajectory.get_neighpack_from_entities(entities);
 
   SECTION("Comparing pair counting between methods") {
     std::atomic<size_t> cell_list_pairs{0};
@@ -383,9 +428,8 @@ TEST_CASE("CellList vs Double Loop Comparison inside Trajectory with selection",
 
     trajan::core::NeighbourList neighbour_list(unit_cell, cutoff, num_threads);
     double cell_list_time = measure_execution_time([&]() {
-      neighbour_list.update(nlp);
-      neighbour_list.iterate_neighbours([&](const trajan::core::Entity &e1,
-                                            const trajan::core::Entity &e2,
+      neighbour_list.update(entities);
+      neighbour_list.iterate_neighbours([&](const Entity &e1, const Entity &e2,
                                             double rsq) { cell_list_pairs++; });
     });
 
@@ -393,10 +437,11 @@ TEST_CASE("CellList vs Double Loop Comparison inside Trajectory with selection",
         trajan::core::NeighbourList(unit_cell, cutoff, num_threads,
                                     trajan::core::NeighbourList::Type::Verlet);
     double verlet_list_time = measure_execution_time([&]() {
-      neighbour_list.update(nlp);
+      neighbour_list.update(entities);
       neighbour_list.iterate_neighbours(
-          [&](const trajan::core::Entity &e1, const trajan::core::Entity &e2,
-              double rsq) { verlet_list_pairs++; });
+          [&](const Entity &e1, const Entity &e2, double rsq) {
+            verlet_list_pairs++;
+          });
     });
 
     INFO("System size: " << num_atoms << " atoms");
@@ -457,7 +502,7 @@ TEST_CASE(
   }
 
   frame.set_atoms(atoms);
-  std::string sel = "tO2";
+  std::string sel = "aO2";
   std::optional<SelectionCriteria> result1 = SelectionParser::parse(sel);
   REQUIRE(result1);
   SelectionCriteria sc1 = *result1;
@@ -471,19 +516,6 @@ TEST_CASE(
   Entities deduplicated_entities = result.first;
   std::vector<std::bitset<8>> presence_tracker = result.second;
   size_t entities_size = deduplicated_entities.size();
-  NeighbourListPacket nlp =
-      trajectory.get_neighpack_from_entities(deduplicated_entities);
-  for (size_t i = 0; i < nlp.entities.size(); i++) {
-    std::cout << fmt::format("NLP: {:>6} {:>8.3f} {:>8.3f} {:>8.3f} {:>8.3f} "
-                             "{:>8.3f} {:>8.3f}",
-                             i, nlp.wrapped_cart_pos.col(i).x(),
-                             nlp.wrapped_cart_pos.col(i).y(),
-                             nlp.wrapped_cart_pos.col(i).z(),
-                             nlp.wrapped_frac_pos.col(i).x(),
-                             nlp.wrapped_frac_pos.col(i).y(),
-                             nlp.wrapped_frac_pos.col(i).z())
-              << std::endl;
-  }
 
   SECTION("Comparing pair counting between methods") {
     std::atomic<size_t> cell_list_pairs{0};
@@ -491,7 +523,7 @@ TEST_CASE(
 
     trajan::core::NeighbourList neighbour_list(unit_cell, cutoff, num_threads);
     double cell_list_time = measure_execution_time([&]() {
-      neighbour_list.update(nlp);
+      neighbour_list.update(all_entities);
       neighbour_list.iterate_neighbours([&](const trajan::core::Entity &e1,
                                             const trajan::core::Entity &e2,
                                             double rsq) { cell_list_pairs++; });
@@ -501,7 +533,7 @@ TEST_CASE(
         trajan::core::NeighbourList(unit_cell, cutoff, num_threads,
                                     trajan::core::NeighbourList::Type::Verlet);
     double verlet_list_time = measure_execution_time([&]() {
-      neighbour_list.update(nlp);
+      neighbour_list.update(all_entities);
       neighbour_list.iterate_neighbours(
           [&](const trajan::core::Entity &e1, const trajan::core::Entity &e2,
               double rsq) { verlet_list_pairs++; });
@@ -532,7 +564,7 @@ TEST_CASE(
     std::atomic<size_t> cell_list_pairs_presence{0};
 
     trajan::core::NeighbourList neighbour_list(unit_cell, cutoff, num_threads);
-    neighbour_list.update(nlp);
+    neighbour_list.update(deduplicated_entities);
     neighbour_list.iterate_neighbours([&](const trajan::core::Entity &e1,
                                           const trajan::core::Entity &e2,
                                           double rsq) { cell_list_pairs++; });
