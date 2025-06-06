@@ -1,6 +1,8 @@
 #pragma once
 #include <ankerl/unordered_dense.h>
+#include <fmt/core.h>
 #include <queue>
+#include <trajan/core/log.h>
 #include <vector>
 
 namespace trajan::core::graph {
@@ -17,12 +19,14 @@ public:
   Graph() = default;
   Graph(const std::vector<NodeType> &nodes) : m_nodes(nodes) {}
 
-  std::vector<ConnectedComponent> find_connected_components() {
+  inline std::vector<ConnectedComponent> find_connected_components() const {
+    std::vector<ConnectedComponent> components;
+    components.clear();
+    components.reserve(m_nodes.size());
     if (m_adjacency_list.empty()) {
-      throw std::runtime_error("Build graph.");
+      trajan::log::critical("Graph structure not built.");
+      return components;
     }
-    m_components.clear();
-    m_components.reserve(m_nodes.size());
     ankerl::unordered_dense::set<NodeID> visited;
 
     for (size_t i = 0; i < m_nodes.size(); i++) {
@@ -58,13 +62,13 @@ public:
         }
       }
 
-      m_components.push_back(component);
+      components.push_back(component);
     }
 
-    return m_components;
+    return components;
   }
 
-  const NodeType &get_node_by_id(NodeID id) const {
+  inline const NodeType &get_node_by_id(NodeID id) const {
     for (const auto &node : m_nodes) {
       if (get_node_id_from_node(node) == id) {
         return node;
@@ -73,18 +77,37 @@ public:
     throw std::runtime_error("Node ID not found");
   }
 
-  const AdjacencyList &get_adjacency_list() const { return m_adjacency_list; }
+  inline const AdjacencyList &get_adjacency_list() const {
+    return m_adjacency_list;
+  }
 
   virtual NodeID get_node_id_from_node(const NodeType &node) const = 0;
 
-  void add_edge(NodeID idx1, NodeID idx2, EdgeType &edge) {
+  inline void add_edge(NodeID idx1, NodeID idx2, EdgeType &edge) {
     m_adjacency_list[idx1][idx2] = edge;
+    m_adjacency_list[idx2][idx1] = edge;
   }
+  inline void remove_edge(NodeID idx1, NodeID idx2) {
+    auto source_it1 = m_adjacency_list.find(idx1);
+    if (source_it1 != m_adjacency_list.end()) {
+      source_it1->second.erase(idx2);
+      if (source_it1->second.empty()) {
+        m_adjacency_list.erase(source_it1);
+      }
+    }
+    auto source_it2 = m_adjacency_list.find(idx2);
+    if (source_it2 != m_adjacency_list.end()) {
+      source_it2->second.erase(idx1);
+      if (source_it2->second.empty()) {
+        m_adjacency_list.erase(source_it2);
+      }
+    }
+  }
+  inline void clear_edges() { m_adjacency_list.clear(); }
 
 protected:
   std::vector<NodeType> m_nodes;
   AdjacencyList m_adjacency_list;
-  std::vector<ConnectedComponent> m_components;
 
   NodeID get_node_id(size_t index) const {
     return get_node_id_from_node(m_nodes[index]);

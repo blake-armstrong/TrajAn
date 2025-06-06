@@ -1,10 +1,9 @@
-#include "trajan/core/util.h"
-#include <bitset>
 #include <omp.h>
 #include <stdexcept>
 #include <trajan/core/frame.h>
 #include <trajan/core/log.h>
 #include <trajan/core/neigh.h>
+#include <trajan/core/util.h>
 
 namespace trajan::core {
 
@@ -102,17 +101,11 @@ void CellList::update(const NeighbourListPacket &nlp) {
     }
     this->initialise_cells(0);
   }
-  // if (atoms.size() != cart_pos.cols()) {
-  //   std::runtime_error("Number of atoms and their positions not the same.");
-  // }
   this->clear_cells();
-  // Mat3N frac_pos = m_unit_cell.to_fractional(cart_pos);
-  // frac_pos = frac_pos.array() - frac_pos.array().floor();
   Mat3N frac_pos = nlp.wrapped_frac_pos;
   IVec inds_a = (frac_pos.row(0) * m_params.a).cast<int>();
   IVec inds_b = (frac_pos.row(1) * m_params.b).cast<int>();
   IVec inds_c = (frac_pos.row(2) * m_params.c).cast<int>();
-  // Mat3N pos = m_unit_cell.to_cartesian(frac_pos);
   Mat3N cart_pos = nlp.wrapped_cart_pos;
   for (int ent_i = 0; ent_i < nlp.size(); ent_i++) {
     Vec3 ent_pos = cart_pos.col(ent_i);
@@ -166,10 +159,12 @@ void CellList::cell_loop(const NeighbourCallback &callback) const {
       for (size_t j = i + 1; j < center_entities.size(); ++j) {
         const Entity &ent2 = center_entities[j];
         if (m_current_nlp.check_presence) {
-          std::bitset<8> bts[2] = {m_current_nlp.presence_tracker[ent1.idx],
-                                   m_current_nlp.presence_tracker[ent2.idx]};
-          bool is_cross_section = trajan::util::cross_section_fold<2>(2, bts);
+          bool is_cross_section = m_current_nlp.presence_tracker[ent1.idx] !=
+                                  m_current_nlp.presence_tracker[ent2.idx];
           if (!is_cross_section) {
+            continue;
+          }
+          if (m_current_nlp.are_same_entity(ent1.idx, ent2.idx)) {
             continue;
           }
         }
@@ -185,10 +180,12 @@ void CellList::cell_loop(const NeighbourCallback &callback) const {
       for (const Entity &ent1 : center_entities) {
         for (const Entity &ent2 : neigh_entities) {
           if (m_current_nlp.check_presence) {
-            std::bitset<8> bts[2] = {m_current_nlp.presence_tracker[ent1.idx],
-                                     m_current_nlp.presence_tracker[ent2.idx]};
-            bool is_cross_section = trajan::util::cross_section_fold<2>(2, bts);
+            bool is_cross_section = m_current_nlp.presence_tracker[ent1.idx] !=
+                                    m_current_nlp.presence_tracker[ent2.idx];
             if (!is_cross_section) {
+              continue;
+            }
+            if (m_current_nlp.are_same_entity(ent1.idx, ent2.idx)) {
               continue;
             }
           }
@@ -223,10 +220,12 @@ void VerletList::verlet_loop(const NeighbourCallback &callback) const {
   for (size_t i = 0; i < m_current_nlp.size(); ++i) {
     for (size_t j = i + 1; j < m_current_nlp.size(); ++j) {
       if (m_current_nlp.check_presence) {
-        std::bitset<8> bts[2] = {m_current_nlp.presence_tracker[i],
-                                 m_current_nlp.presence_tracker[j]};
-        bool is_cross_section = trajan::util::cross_section_fold<2>(2, bts);
+        bool is_cross_section = m_current_nlp.presence_tracker[i] !=
+                                m_current_nlp.presence_tracker[j];
         if (!is_cross_section) {
+          continue;
+        }
+        if (m_current_nlp.are_same_entity(i, j)) {
           continue;
         }
       }
@@ -327,13 +326,27 @@ void NeighbourList::update(const std::vector<EntityType> &og_objects,
 void NeighbourList::update(
     const std::vector<std::vector<EntityType>> &og_objects_vec,
     Molecule::Origin o) {
-  auto result = trajan::util::combine_deduplicate_map(
-      og_objects_vec, core::VariantHash(), core::VariantEqual());
-  std::vector<EntityType> deduplicated_entities = result.first;
-  std::vector<std::bitset<8>> presence_tracker = result.second;
-  this->base_update(deduplicated_entities, o);
-  m_current_nlp.presence_tracker = presence_tracker;
+  // auto result = trajan::util::combine_deduplicate_map(
+  //     og_objects_vec, core::VariantHash(), core::VariantEqual());
+  // std::vector<EntityType> deduplicated_entities = result.first;
+  // std::vector<std::bitset<8>> presence_tracker = result.second;
+  // this->base_update(deduplicated_entities, o);
+  // auto result = trajan::util::combine_map(og_objects_vec,
+  // core::VariantHash(),
+  //                                         core::VariantEqual());
+  // std::vector<EntityType> combined_entities = result.first;
+  // std::vector<std::bitset<8>> presence_tracker = result.second;
+  // this->base_update(combined_entities, o);
+  // m_current_nlp.presence_tracker = presence_tracker;
+  // m_current_nlp.check_presence = true;
+
+  auto [combined_entities, presence, canonical_map] =
+      trajan::util::combine_map_check(og_objects_vec, core::VariantHash(),
+                                      core::VariantEqual());
+  this->base_update(combined_entities, o);
+  m_current_nlp.presence_tracker = presence;
   m_current_nlp.check_presence = true;
+  m_current_nlp.index_to_canonical = canonical_map;
   m_impl->update(m_current_nlp);
 }
 

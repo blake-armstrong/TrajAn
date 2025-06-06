@@ -101,9 +101,6 @@ void Trajectory::update_neigh(const UnitCell &unit_cell, double rcut,
 
 std::vector<EntityType>
 Trajectory::get_entities(const io::SelectionCriteria &selection) {
-  if (!m_frame_loaded) {
-    throw std::runtime_error("No frame loaded. Call next_frame() first.");
-  }
   std::vector<Atom> atoms = this->atoms();
   std::vector<Molecule> molecules;
   std::vector<EntityType> entities;
@@ -166,28 +163,16 @@ void Trajectory::update_unit_cell_connectivity() {
   this->update_neigh();
   this->update_bond_graph();
 
-  m_topo_neigh_list.update(this->atoms());
+  const std::vector<Atom> &atoms = this->atoms();
+
+  m_topo_neigh_list.update(atoms);
 
   // TODO: allow user input tolerance
   double tol = 0.4;
-  const std::vector<Atom> &atoms = this->atoms();
   NeighbourCallback func = [&](const Entity &ent1, const Entity &ent2,
                                double rsq) {
     const Atom &atom1 = atoms[ent1.idx];
     const Atom &atom2 = atoms[ent2.idx];
-    // std::visit(
-    //     [rsq, &bg, tol](const auto &e1, const auto &e2) {
-    //       using T1 = std::decay_t<decltype(e1)>;
-    //       using T2 = std::decay_t<decltype(e2)>;
-    //       if constexpr (std::is_same_v<T1, Atom> && std::is_same_v<T2, Atom>)
-    //       {
-    //         std::optional<Bond> bond = e1.is_bonded_with_rsq(e2, rsq, tol);
-    //         if (bond) {
-    //           bg.add_edge(e1.index, e2.index, *bond);
-    //         }
-    //       }
-    //     },
-    //     ntt1, ntt2);
     std::optional<Bond> bond = atom1.is_bonded_with_rsq(atom2, rsq, tol);
     if (bond) {
       m_bond_graph.add_edge(atom1.index, atom2.index, *bond);
@@ -202,9 +187,12 @@ void Trajectory::update_unit_cell_connectivity() {
 void Trajectory::update_unit_cell_molecules() {
   using CC = graph::ConnectedComponent<Atom, Bond>;
   m_unit_cell_molecules.clear();
-  BondGraph bg = unit_cell_connectivity();
+  BondGraph bg = this->unit_cell_connectivity();
   std::vector<CC> ccs = bg.find_connected_components();
   for (CC &cc : ccs) {
+    Molecule mol(cc);
+    mol.type = "UNK";
+    mol.index = m_unit_cell_molecules.size();
     m_unit_cell_molecules.emplace_back(cc);
   }
   m_unit_cell_molecules_needs_update = false;

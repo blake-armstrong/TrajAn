@@ -9,6 +9,7 @@ set(TRAJAN_CORE_INCLUDE_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/neigh.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/unit_cell.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/trajectory.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/topology.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/frame.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/linear_algebra.h"
     PARENT_SCOPE)

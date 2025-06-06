@@ -2,7 +2,7 @@
 #include <trajan/core/log.h>
 #include <trajan/core/util.h>
 
-namespace trajan::core::element {
+namespace trajan::core {
 
 ElementData *max_element =
     std::max_element(std::begin(ELEMENTDATA_TABLE), std::end(ELEMENTDATA_TABLE),
@@ -75,4 +75,4 @@ std::string chemical_formula(const std::vector<Element> &els) {
   return result;
 }
 
-} // namespace trajan::core::element
+} // namespace trajan::core

@@ -1,11 +1,10 @@
-#include "trajan/core/trajectory.h"
 #include <CLI/CLI.hpp>
 #include <ankerl/unordered_dense.h>
-#include <bitset>
 #include <memory>
 #include <stdexcept>
 #include <trajan/core/log.h>
 #include <trajan/core/neigh.h>
+#include <trajan/core/trajectory.h>
 #include <trajan/core/util.h>
 #include <trajan/io/file_handler.h>
 #include <trajan/io/selection.h>
@@ -21,39 +20,43 @@ void RDFResult::normalise_by_count(size_t count) {
   if (count == 0) {
     throw std::runtime_error("Count is 0.");
   }
+  double d_count = count;
   for (size_t i = 0; i < gofr.size(); ++i) {
-    nofr[i] /= count;
-    gofr[i] /= count;
+    nofr[i] /= d_count;
+    gofr[i] /= d_count;
   }
 }
 
 void run_rdf_subcommand(const RDFOpts &opts) {
 
   RDFResult rdf(opts.nbins);
-  RDFResult accumulated_rdf(opts.nbins);
-  size_t frame_count = 0;
   double bin_width = opts.rcut / opts.nbins;
   double inv_bin_width = 1 / bin_width;
   double norm = 4.0 * trajan::units::PI / 3.0;
   for (size_t i = 0; i < opts.nbins; i++) {
     double ri = (i + 0.5) * bin_width;
     rdf.r[i] = ri;
-    accumulated_rdf.r[i] = ri;
   }
 
   core::Trajectory trajectory;
 
   trajectory.load_files(opts.infiles);
 
+  size_t frame_count = 0;
   while (trajectory.next_frame()) {
     core::UnitCell uc = trajectory.unit_cell();
+    // TODO: find a way to not create a new nl each time
     core::NeighbourList nl(uc, opts.rcut, opts.num_threads);
     std::vector<core::EntityType> sel1 =
         trajectory.get_entities(*opts.parsed_sel1);
     std::vector<core::EntityType> sel2 =
         trajectory.get_entities(*opts.parsed_sel2);
     // TODO: molecule origin input
+
     nl.update({sel1, sel2});
+
+    std::fill(rdf.nofr.begin(), rdf.nofr.end(), 0.0);
+
     core::NeighbourCallback func = [&](const core::Entity &ent1,
                                        const core::Entity &ent2, double rsq) {
       double r = std::sqrt(rsq);
@@ -61,9 +64,7 @@ void run_rdf_subcommand(const RDFOpts &opts) {
       rdf.nofr[bin_idx]++;
     };
     nl.iterate_neighbours(func);
-    double sel2_density = sel2.size() / uc.volume();
-    double sel1_ref = sel1.size() / 2.0;
-    double density_norm = sel1_ref * sel2_density;
+    double density_norm = sel1.size() * sel2.size() / uc.volume();
     for (size_t i = 0; i < opts.nbins; i++) {
       double ri = rdf.r[i];
       double shell_volume = norm * (std::pow(ri + bin_width / 2, 3) -
@@ -77,10 +78,10 @@ void run_rdf_subcommand(const RDFOpts &opts) {
 
   TextFileWriter outfile;
   outfile.open(opts.outfile);
-  outfile.write_line("{:>16} {:>16} {:>16}", "r", "nofr", "gofr");
-  std::string fmt_str = "{:>16.8f} {:>16.4f} {:>16.8f}";
+  outfile.write_line("{:>16} {:>16}", "r", "gofr");
+  std::string fmt_str = "{:>16.8f} {:>16.8f}";
   for (size_t i = 0; i < opts.nbins; i++) {
-    outfile.write_line(fmt_str, rdf.r[i], rdf.nofr[i], rdf.gofr[i]);
+    outfile.write_line(fmt_str, rdf.r[i], rdf.gofr[i]);
   }
   outfile.close();
 }

@@ -155,36 +155,85 @@ static inline std::vector<T> deduplicate_variant(const std::vector<T> &input,
   return result;
 }
 
-// template <typename T, typename Hash = std::hash<T>,
-//           typename Equal = std::equal_to<T>>
-// std::pair<std::vector<T>, std::vector<size_t>>
-// combine_deduplicate_map(const std::vector<std::vector<T>> &vecs,
-//                         Hash hasher = Hash(), Equal equal = Equal()) {
-//
-//   std::vector<T> result;
-//   std::vector<size_t> source_map;
-//
-//   size_t total_size = 0;
-//   for (const auto &vec : vecs) {
-//     total_size += vec.size();
-//   }
-//
-//   result.reserve(total_size);
-//   source_map.reserve(total_size);
-//
-//   ankerl::unordered_dense::set<T, Hash, Equal> seen(0, hasher, equal);
-//
-//   for (size_t vec_idx = 0; vec_idx < vecs.size(); ++vec_idx) {
-//     for (const auto &element : vecs[vec_idx]) {
-//       if (seen.insert(element).second) {
-//         result.push_back(element);
-//         source_map.push_back(vec_idx);
-//       }
-//     }
-//   }
-//
-//   return {result, source_map};
-// }
+template <typename T, typename Hash = std::hash<T>,
+          typename Equal = std::equal_to<T>>
+static inline std::pair<std::vector<T>, std::vector<std::bitset<8>>>
+combine_map(const std::vector<std::vector<T>> &vecs, Hash hasher = Hash(),
+            Equal equal = Equal()) {
+  std::vector<T> result;
+  size_t total_size = 0;
+  for (const auto &vec : vecs) {
+    total_size += vec.size();
+  }
+  result.reserve(total_size);
+
+  std::vector<std::bitset<8>> presence_tracker;
+  presence_tracker.reserve(total_size);
+
+  for (size_t vec_idx = 0; vec_idx < vecs.size(); ++vec_idx) {
+    for (const auto &element : vecs[vec_idx]) {
+      result.push_back(element);
+      std::bitset<8> presence;
+      presence.set(vec_idx);
+      presence_tracker.push_back(presence);
+    }
+  }
+
+  return {result, presence_tracker};
+}
+
+template <typename T, typename Hash = std::hash<T>,
+          typename Equal = std::equal_to<T>>
+static inline std::tuple<std::vector<T>, std::vector<size_t>,
+                         ankerl::unordered_dense::map<size_t, size_t>>
+combine_map_check(const std::vector<std::vector<T>> &vecs, Hash hasher = Hash(),
+                  Equal equal = Equal()) {
+  std::vector<T> result;
+  size_t total_size = 0;
+  for (const auto &vec : vecs) {
+    total_size += vec.size();
+  }
+  result.reserve(total_size);
+  std::vector<size_t> presence_tracker;
+  presence_tracker.reserve(total_size);
+  ankerl::unordered_dense::map<T, std::vector<size_t>, Hash, Equal>
+      entity_to_indices;
+  ankerl::unordered_dense::map<size_t, size_t> index_to_canonical;
+
+  for (size_t vec_idx = 0; vec_idx < vecs.size(); ++vec_idx) {
+    for (const auto &element : vecs[vec_idx]) {
+      size_t current_index = result.size();
+      result.push_back(element);
+      presence_tracker.push_back(vec_idx);
+
+      auto it = entity_to_indices.find(element);
+      if (it == entity_to_indices.end()) {
+        entity_to_indices[element].push_back(current_index);
+        index_to_canonical[current_index] = current_index;
+      } else {
+        size_t canonical_idx = it->second[0];
+        entity_to_indices[element].push_back(current_index);
+        index_to_canonical[current_index] = canonical_idx;
+      }
+    }
+  }
+
+  return {result, presence_tracker, index_to_canonical};
+}
+
+static inline bool
+is_cross_section(const std::vector<size_t> &indices,
+                 const std::vector<size_t> &presence_tracker) {
+  ankerl::unordered_dense::set<size_t> seen_vectors;
+  for (size_t idx : indices) {
+    size_t original_vector = presence_tracker[idx];
+    if (seen_vectors.find(original_vector) != seen_vectors.end()) {
+      return false;
+    }
+    seen_vectors.insert(original_vector);
+  }
+  return true;
+}
 
 template <typename T, typename Hash = std::hash<T>,
           typename Equal = std::equal_to<T>>
@@ -232,83 +281,6 @@ inline bool cross_section_fold(size_t num_sources, const std::bitset<8> *bts) {
   }
   return true;
 }
-
-// template <typename T, typename Hash = std::hash<T>,
-//           typename Equal = std::equal_to<T>>
-// static inline std::pair<std::vector<T>, std::vector<uint8_t>>
-// combine_deduplicate_map(const std::vector<std::vector<T>> &vecs,
-//                         Hash hasher = Hash(), Equal equal = Equal()) {
-//
-//   std::vector<T> result;
-//   // apping from result index to a bitmask of source vector indices
-//   // Bit 0 = present in vecs[0], Bit 1 = present in vecs[1], etc.
-//   std::vector<uint8_t> source_map;
-//   size_t total_size = 0;
-//   for (const auto &vec : vecs) {
-//     total_size += vec.size();
-//   }
-//
-//   result.reserve(total_size);
-//   source_map.reserve(total_size);
-//
-//   if (vecs.size() > 8) {
-//     throw std::runtime_error("Too many vectors for uint8_t bitmask");
-//   }
-//
-//   ankerl::unordered_dense::map<T, size_t, Hash, Equal> element_indices(
-//       0, hasher, equal);
-//
-//   for (size_t vec_idx = 0; vec_idx < vecs.size(); ++vec_idx) {
-//     uint8_t vec_bit = static_cast<uint8_t>(1 << vec_idx);
-//     for (const auto &element : vecs[vec_idx]) {
-//       auto [it, inserted] = element_indices.try_emplace(element,
-//       result.size());
-//
-//       if (inserted) {
-//         result.push_back(element);
-//         source_map.push_back(vec_bit);
-//       } else {
-//         source_map[it->second] |= vec_bit;
-//       }
-//     }
-//   }
-//   return {result, source_map};
-// }
-//
-// template <typename Container>
-// inline bool covers_all_vectors(const Container &source_maps,
-//                                size_t num_vectors) {
-//   uint8_t combined_mask = 0;
-//
-//   for (const auto &source : source_maps) {
-//     combined_mask |= source;
-//   }
-//
-//   uint8_t required_mask = (1 << num_vectors) - 1;
-//   return (combined_mask & required_mask) == required_mask;
-// }
-//
-// inline bool is_cross_section_any(uint8_t source_i, uint8_t source_j,
-//                                  size_t num_vectors = 2) {
-//   std::array<uint8_t, 2> sources = {source_i, source_j};
-//   return covers_all_vectors(sources, num_vectors);
-// }
-//
-// template <typename... Args> inline bool is_cross_section_any(Args...
-// sources)
-// {
-//   std::array<uint8_t, sizeof...(Args)> source_array = {
-//       static_cast<uint8_t>(sources)...};
-//   size_t num_vectors = sizeof...(Args);
-//   return covers_all_vectors(source_array, num_vectors);
-// }
-//
-// template <typename... Args>
-// inline bool forms_cross_section(size_t num_vectors, Args... sources) {
-//   std::array<uint8_t, sizeof...(Args)> source_array = {
-//       static_cast<uint8_t>(sources)...};
-//   return covers_all_vectors(source_array, num_vectors);
-// }
 
 struct Opts {
   size_t num_threads;

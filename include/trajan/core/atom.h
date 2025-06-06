@@ -14,14 +14,17 @@ struct Bond {
 
 struct Atom {
   double x, y, z;
-  element::Element element;
+  Element element;
   std::string type;
   size_t index, serial;
   Atom() : element(0), index(0) {}
   Atom(const Vec3 &pos, int atomic_number, int index)
       : x(pos[0]), y(pos[1]), z(pos[2]),
-        element(static_cast<element::Element>(atomic_number)), index(index) {}
-  Atom(const Vec3 &pos, element::Element element, int index)
+        element(static_cast<Element>(atomic_number)), index(index) {}
+  Atom(const Vec3 &pos, std::string element_type, int index)
+      : x(pos[0]), y(pos[1]), z(pos[2]),
+        element(static_cast<Element>(element_type)), index(index) {}
+  Atom(const Vec3 &pos, Element element, int index)
       : x(pos[0]), y(pos[1]), z(pos[2]), element(element), index(index) {}
   Atom(const Atom &other, Vec3 shift)
       : x(other.x + shift.x()), y(other.y + shift.y()), z(other.z + shift.z()),

@@ -1,4 +1,5 @@
 #include <catch2/benchmark/catch_benchmark.hpp>
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -10,6 +11,7 @@
 #include <trajan/core/linear_algebra.h>
 #include <trajan/core/molecule.h>
 #include <trajan/core/neigh.h>
+#include <trajan/core/topology.h>
 #include <trajan/core/trajectory.h>
 #include <trajan/core/unit_cell.h>
 #include <trajan/core/units.h>
@@ -19,16 +21,18 @@
 using trajan::Mat3N;
 using trajan::Vec3;
 using trajan::core::Atom;
+using trajan::core::Bond;
+using trajan::core::BondGraph;
 using trajan::core::Cell;
 using trajan::core::CellList;
+using trajan::core::DihedralType;
+using trajan::core::Element;
 using trajan::core::Entity;
 using trajan::core::Frame;
 using trajan::core::Molecule;
+using trajan::core::Topology;
 using trajan::core::Trajectory;
 using trajan::core::UnitCell;
-using trajan::core::VariantEqual;
-using trajan::core::VariantHash;
-using trajan::core::element::Element;
 using trajan::io::SelectionCriteria;
 using trajan::io::SelectionParser;
 using Entities = std::vector<trajan::core::EntityType>;
@@ -511,11 +515,7 @@ TEST_CASE(
   SelectionCriteria sc2 = *result2;
   std::vector<Entities> all_entities = {trajectory.get_entities(sc1),
                                         trajectory.get_entities(sc2)};
-  auto result = trajan::util::combine_deduplicate_map(
-      all_entities, VariantHash(), VariantEqual());
-  Entities deduplicated_entities = result.first;
-  std::vector<std::bitset<8>> presence_tracker = result.second;
-  size_t entities_size = deduplicated_entities.size();
+  size_t entities_size = all_entities[0].size();
 
   SECTION("Comparing pair counting between methods") {
     std::atomic<size_t> cell_list_pairs{0};
@@ -547,7 +547,7 @@ TEST_CASE(
     double volume = box_size * box_size * box_size;
     double expected_pairs_per_atom =
         (4.0 / 3.0) * units::PI * std::pow(cutoff, 3) / volume * entities_size;
-    double total_expected_pairs = expected_pairs_per_atom * entities_size / 2;
+    double total_expected_pairs = expected_pairs_per_atom * entities_size;
     INFO("Expected approximate number of pairs: ~" << total_expected_pairs);
     INFO("Pairs found (cell list): " << cell_list_pairs);
     INFO("Pairs found (double loop): " << verlet_list_pairs);
@@ -558,29 +558,6 @@ TEST_CASE(
     INFO("Verlet list execution time: " << verlet_list_time << " seconds");
     INFO("Speed-up factor: " << verlet_list_time / cell_list_time);
     REQUIRE(verlet_list_time > cell_list_time);
-  }
-  SECTION("Comparing pair counting between methods with presence tracker") {
-    std::atomic<size_t> cell_list_pairs{0};
-    std::atomic<size_t> cell_list_pairs_presence{0};
-
-    trajan::core::NeighbourList neighbour_list(unit_cell, cutoff, num_threads);
-    neighbour_list.update(deduplicated_entities);
-    neighbour_list.iterate_neighbours([&](const trajan::core::Entity &e1,
-                                          const trajan::core::Entity &e2,
-                                          double rsq) { cell_list_pairs++; });
-    neighbour_list.iterate_neighbours([&](const trajan::core::Entity &e1,
-                                          const trajan::core::Entity &e2,
-                                          double rsq) {
-      std::bitset<8> source1 = presence_tracker[e1.idx];
-      std::bitset<8> source2 = presence_tracker[e2.idx];
-      bool is_cross_section = (source1.test(0) && source2.test(1)) ||
-                              (source1.test(1) && source2.test(0));
-      if (!is_cross_section) {
-        return;
-      }
-      cell_list_pairs_presence++;
-    });
-    REQUIRE(cell_list_pairs == cell_list_pairs_presence);
   }
 }
 
@@ -612,76 +589,6 @@ TEST_CASE("Molecule construction from atoms", "[molecule]") {
     REQUIRE(molecule.size() == 3);
   }
 }
-
-// TEST_CASE("Molecule identification from atoms", "[molecule]") {
-//   SECTION("Empty atom list") {
-//     std::vector<Atom> atoms;
-//     auto molecules = trajan::core::identify_molecules(atoms);
-//
-//     REQUIRE(molecules.empty());
-//   }
-//
-//   SECTION("Single water molecule") {
-//     std::vector<Atom> atoms = {
-//         Atom(Vec3{0.0, 0.0, 0.0}, Element("O", true), 0),
-//         Atom(Vec3{0.8, 0.0, 0.0}, Element("H", true), 1),
-//         Atom(Vec3{-0.2, 0.8, 0.0}, Element("H", true), 2)};
-//
-//     auto molecules = trajan::core::identify_molecules(atoms);
-//
-//     REQUIRE(molecules.size() == 1);
-//     REQUIRE(molecules[0].size() == 3);
-//   }
-//
-//   SECTION("Two separate water molecules") {
-//     std::vector<Atom> atoms = {
-//         // First water molecule
-//         Atom(Vec3{0.0, 0.0, 0.0}, Element("O", true), 0),
-//         Atom(Vec3{0.8, 0.0, 0.0}, Element("H", true), 1),
-//         Atom(Vec3{-0.2, 0.8, 0.0}, Element("H", true), 2),
-//         // Second water molecule (far away)
-//         Atom(Vec3{10.0, 10.0, 10.0}, Element("O", true), 4),
-//         Atom(Vec3{10.8, 10.0, 10.0}, Element("H", true), 5),
-//         Atom(Vec3{9.8, 10.8, 10.0}, Element("H", true), 6)};
-//
-//     auto molecules = trajan::core::identify_molecules(atoms);
-//
-//     REQUIRE(molecules.size() == 2);
-//     REQUIRE(molecules[0].size() == 3);
-//     REQUIRE(molecules[1].size() == 3);
-//   }
-//
-//   SECTION("Three separate atoms that are not bonded") {
-//     std::vector<Atom> atoms = {
-//         Atom(Vec3{0.0, 0.0, 0.0}, Element("Na", true), 0),
-//         Atom(Vec3{10.0, 0.0, 0.0}, Element("Cl", true), 1),
-//         Atom(Vec3{0.0, 10.0, 0.0}, Element("Ar", true), 2)};
-//
-//     auto molecules = trajan::core::identify_molecules(atoms);
-//
-//     REQUIRE(molecules.size() == 3);
-//     REQUIRE(molecules[0].size() == 1);
-//     REQUIRE(molecules[1].size() == 1);
-//     REQUIRE(molecules[2].size() == 1);
-//   }
-//
-//   SECTION("Custom bond tolerance") {
-//     std::vector<Atom> atoms = {
-//         Atom(Vec3{0.0, 0.0, 0.0}, Element("C", true), 0),
-//         Atom(Vec3{2.0, 0.0, 0.0}, Element("C", true), 1)
-//         // Distance is larger than default tolerance
-//     };
-//
-//     // With default tolerance, should be two separate molecules
-//     auto molecules_default = trajan::core::identify_molecules(atoms);
-//     REQUIRE(molecules_default.size() == 2);
-//
-//     // With increased tolerance, should be one molecule
-//     auto molecules_increased = trajan::core::identify_molecules(atoms, 1.0);
-//     REQUIRE(molecules_increased.size() == 1);
-//     REQUIRE(molecules_increased[0].size() == 2);
-//   }
-// }
 
 TEST_CASE("MoleculeGraph bond detection", "[molecule][graph]") {
   SECTION("Bonded atoms") {
@@ -720,80 +627,499 @@ TEST_CASE("MoleculeGraph bond detection", "[molecule][graph]") {
   }
 }
 
-// TEST_CASE("Complex molecule identification", "[molecule][integration]") {
-//   SECTION("Methane molecule") {
-//     std::vector<Atom> atoms = {
-//         Atom(Vec3{0.0, 0.0, 0.0}, Element("C", true), 0),
-//         Atom(Vec3{0.8, 0.8, 0.8}, Element("H", true), 1),
-//         Atom(Vec3{-0.8, -0.8, 0.8}, Element("H", true), 2),
-//         Atom(Vec3{0.8, -0.8, -0.8}, Element("H", true), 3),
-//         Atom(Vec3{-0.8, 0.8, -0.8}, Element("H", true), 4)};
-//
-//     auto molecules = trajan::core::identify_molecules(atoms, 0.8);
-//
-//     REQUIRE(molecules.size() == 1);
-//     REQUIRE(molecules[0].size() == 5);
-//   }
-//
-//   SECTION("Ethanol molecule") {
-//     std::vector<Atom> atoms = {
-//         // Carbon chain
-//         Atom(Vec3{0.0, 0.0, 0.0}, Element("C", true), 0),
-//         Atom(Vec3{1.5, 0.0, 0.0}, Element("C", true), 1),
-//         // Hydrogens on first carbon
-//         Atom(Vec3{-0.5, 0.9, 0.0}, Element("H", true), 2),
-//         Atom(Vec3{-0.5, -0.5, 0.9}, Element("H", true), 3),
-//         Atom(Vec3{-0.5, -0.5, -0.9}, Element("H", true), 4),
-//         // Hydrogens on second carbon
-//         Atom(Vec3{2.0, 0.9, 0.0}, Element("H", true), 5),
-//         Atom(Vec3{2.0, -0.5, -0.9}, Element("H", true), 6),
-//         // Oxygen and its hydrogen
-//         Atom(Vec3{2.0, -0.5, 0.9}, Element("O", true), 7),
-//         Atom(Vec3{3.0, -0.5, 0.9}, Element("H", true), 8)};
-//
-//     auto molecules = trajan::core::identify_molecules(atoms);
-//
-//     REQUIRE(molecules.size() == 1);
-//     REQUIRE(molecules[0].size() == 9);
-//   }
-//
-//   SECTION("Mixture of molecules") {
-//     std::vector<Atom> atoms = {
-//         // Water molecule
-//         Atom(Vec3{0.0, 0.0, 0.0}, Element("O", true), 0),
-//         Atom(Vec3{0.8, 0.0, 0.0}, Element("H", true), 1),
-//         Atom(Vec3{-0.2, 0.8, 0.0}, Element("H", true), 2),
-//         // CO2 molecule
-//         Atom(Vec3{10.0, 10.0, 10.0}, Element("C", true), 3),
-//         Atom(Vec3{11.2, 10.0, 10.0}, Element("O", true), 4),
-//         Atom(Vec3{8.8, 10.0, 10.0}, Element("O", true), 5),
-//         // Single atom
-//         Atom(Vec3{20.0, 20.0, 20.0}, Element("Na", true), 6)};
-//
-//     auto molecules = trajan::core::identify_molecules(atoms);
-//
-//     REQUIRE(molecules.size() == 3);
-//     // Check sizes of each molecule
-//     bool found_water = false;
-//     bool found_co2 = false;
-//     bool found_sodium = false;
-//
-//     for (const auto &mol : molecules) {
-//       if (mol.size() == 3) {
-//         // Could be water or CO2
-//         // In a real test, you'd need more checks to distinguish
-//         if (!found_water) {
-//           found_water = true;
-//         } else {
-//           found_co2 = true;
-//         }
-//       } else if (mol.size() == 1) {
-//         found_sodium = true;
-//       }
-//     }
-//
-//     REQUIRE(found_water);
-//     REQUIRE(found_co2);
-//     REQUIRE(found_sodium);
-//   }
-// }
+std::vector<Atom> create_test_atoms() {
+  std::vector<Atom> atoms;
+
+  // Create a simple methane-like molecule (C-H4)
+  atoms.emplace_back(Vec3{0.0, 0.0, 0.0}, "C",
+                     0);                            // Carbon center
+  atoms.emplace_back(Vec3{1.1, 0.0, 0.0}, "H", 1);  // H1
+  atoms.emplace_back(Vec3{-1.1, 0.0, 0.0}, "H", 2); // H2
+  atoms.emplace_back(Vec3{0.0, 1.1, 0.0}, "H", 3);  // H3
+  atoms.emplace_back(Vec3{0.0, -1.1, 0.0}, "H", 4); // H4
+
+  return atoms;
+}
+
+std::vector<Atom> create_linear_molecule() {
+  std::vector<Atom> atoms;
+
+  // Create a linear molecule H-C-C-H
+  atoms.emplace_back(Vec3{0.0, 0.0, 0.0}, "H", 0);
+  atoms.emplace_back(Vec3{1.1, 0.0, 0.0}, "C", 1);
+  atoms.emplace_back(Vec3{2.6, 0.0, 0.0}, "C", 2);
+  atoms.emplace_back(Vec3{3.7, 0.0, 0.0}, "H", 3);
+
+  return atoms;
+}
+
+std::vector<Atom> create_disconnected_atoms() {
+  std::vector<Atom> atoms;
+
+  // Create two separate H2 molecules
+  atoms.emplace_back(Vec3{0.0, 0.0, 0.0}, "H", 0);
+  atoms.emplace_back(Vec3{0.8, 0.0, 0.0}, "H", 1);
+  atoms.emplace_back(Vec3{10.0, 0.0, 0.0}, "H", 2);
+  atoms.emplace_back(Vec3{10.8, 0.0, 0.0}, "H", 3);
+
+  return atoms;
+}
+
+TEST_CASE("Topology Construction", "[topology][construction]") {
+  SECTION("Default constructor") {
+    Topology topology;
+    REQUIRE(topology.num_bonds() == 0);
+    REQUIRE(topology.num_angles() == 0);
+    REQUIRE(topology.num_dihedrals() == 0);
+  }
+
+  SECTION("Construction from atoms with automatic bond detection") {
+    auto atoms = create_test_atoms();
+    Topology topology(atoms);
+
+    // Should detect C-H bonds automatically
+    REQUIRE(topology.num_bonds() > 0);
+    REQUIRE(topology.num_angles() > 0);
+  }
+
+  SECTION("Construction from BondGraph") {
+    auto atoms = create_test_atoms();
+    BondGraph bond_graph(atoms);
+
+    // Manually add some bonds
+    Bond bond(1.1);
+    bond_graph.add_edge(0, 1, bond);
+    bond_graph.add_edge(0, 2, bond);
+
+    Topology topology(bond_graph);
+    REQUIRE(topology.num_bonds() == 2);
+    REQUIRE(topology.num_angles() >= 1); // Should have at least H-C-H angle
+  }
+}
+
+TEST_CASE("Bond Management", "[topology][bonds]") {
+  Topology topology;
+
+  SECTION("Adding bonds") {
+    topology.add_bond(0, 1, 1.5);
+    REQUIRE(topology.num_bonds() == 1);
+    REQUIRE(topology.has_bond(0, 1));
+    REQUIRE(topology.has_bond(1, 0)); // Should work both ways
+
+    // Adding duplicate bond should warn but not add
+    topology.add_bond(0, 1, 1.5);
+    REQUIRE(topology.num_bonds() == 1);
+  }
+
+  SECTION("Removing bonds") {
+    topology.add_bond(0, 1, 1.5);
+    topology.add_bond(1, 2, 1.5);
+    REQUIRE(topology.num_bonds() == 2);
+
+    topology.remove_bond(0, 1);
+    REQUIRE(topology.num_bonds() == 1);
+    REQUIRE_FALSE(topology.has_bond(0, 1));
+    REQUIRE(topology.has_bond(1, 2));
+
+    // Removing non-existent bond should warn but not crash
+    topology.remove_bond(0, 1);
+    REQUIRE(topology.num_bonds() == 1);
+  }
+
+  SECTION("Clearing bonds") {
+    topology.add_bond(0, 1, 1.5);
+    topology.add_bond(1, 2, 1.5);
+    topology.add_bond(2, 3, 1.5);
+
+    topology.clear_bonds();
+    REQUIRE(topology.num_bonds() == 0);
+    REQUIRE(topology.num_angles() == 0);
+    REQUIRE(topology.num_dihedrals() == 0);
+  }
+
+  SECTION("Getting bonds") {
+    topology.add_bond(0, 1, 1.5);
+    topology.add_bond(1, 2, 2.0);
+
+    auto bonds = topology.get_bonds();
+    REQUIRE(bonds.size() == 2);
+
+    // Check bond lengths
+    bool found_15 = false, found_20 = false;
+    for (const auto &bond : bonds) {
+      if (Catch::Approx(bond.bond_length) == 1.5)
+        found_15 = true;
+      if (Catch::Approx(bond.bond_length) == 2.0)
+        found_20 = true;
+    }
+    REQUIRE(found_15);
+    REQUIRE(found_20);
+  }
+}
+
+TEST_CASE("Angle Management", "[topology][angles]") {
+  Topology topology;
+
+  SECTION("Adding angles manually") {
+    topology.add_angle(0, 1, 2);
+    REQUIRE(topology.num_angles() == 1);
+    REQUIRE(topology.has_angle(0, 1, 2));
+
+    // Adding duplicate should warn but not add
+    topology.add_angle(0, 1, 2);
+    REQUIRE(topology.num_angles() == 1);
+  }
+
+  SECTION("Removing angles") {
+    topology.add_angle(0, 1, 2);
+    topology.add_angle(1, 2, 3);
+    REQUIRE(topology.num_angles() == 2);
+
+    topology.remove_angle(0, 1, 2);
+    REQUIRE(topology.num_angles() == 1);
+    REQUIRE_FALSE(topology.has_angle(0, 1, 2));
+    REQUIRE(topology.has_angle(1, 2, 3));
+  }
+
+  SECTION("Clearing angles") {
+    topology.add_angle(0, 1, 2);
+    topology.add_angle(1, 2, 3);
+
+    topology.clear_angles();
+    REQUIRE(topology.num_angles() == 0);
+  }
+
+  SECTION("Getting angles") {
+    topology.add_angle(0, 1, 2);
+    topology.add_angle(1, 2, 3);
+
+    auto angles = topology.get_angles();
+    REQUIRE(angles.size() == 2);
+
+    // Check angle structure
+    for (const auto &angle : angles) {
+      REQUIRE(angle.atom_indices.size() == 3);
+      REQUIRE((angle.center_atom() == 1 || angle.center_atom() == 2));
+    }
+  }
+}
+
+TEST_CASE("Dihedral Management", "[topology][dihedrals]") {
+  Topology topology;
+
+  SECTION("Adding dihedrals manually") {
+    topology.add_dihedral(0, 1, 2, 3, DihedralType::PROPER);
+    REQUIRE(topology.num_dihedrals() == 1);
+    REQUIRE(topology.num_proper_dihedrals() == 1);
+    REQUIRE(topology.num_improper_dihedrals() == 0);
+    REQUIRE(topology.has_dihedral(0, 1, 2, 3));
+
+    topology.add_dihedral(4, 5, 6, 7, DihedralType::IMPROPER);
+    REQUIRE(topology.num_dihedrals() == 2);
+    REQUIRE(topology.num_proper_dihedrals() == 1);
+    REQUIRE(topology.num_improper_dihedrals() == 1);
+  }
+
+  SECTION("Removing dihedrals") {
+    topology.add_dihedral(0, 1, 2, 3, DihedralType::PROPER);
+    topology.add_dihedral(1, 2, 3, 4, DihedralType::PROPER);
+    REQUIRE(topology.num_dihedrals() == 2);
+
+    topology.remove_dihedral(0, 1, 2, 3);
+    REQUIRE(topology.num_dihedrals() == 1);
+    REQUIRE_FALSE(topology.has_dihedral(0, 1, 2, 3));
+    REQUIRE(topology.has_dihedral(1, 2, 3, 4));
+  }
+
+  SECTION("Clearing dihedrals") {
+    topology.add_dihedral(0, 1, 2, 3, DihedralType::PROPER);
+    topology.add_dihedral(1, 2, 3, 4, DihedralType::IMPROPER);
+
+    topology.clear_dihedrals();
+    REQUIRE(topology.num_dihedrals() == 0);
+    REQUIRE(topology.num_proper_dihedrals() == 0);
+    REQUIRE(topology.num_improper_dihedrals() == 0);
+  }
+
+  SECTION("Getting dihedrals") {
+    topology.add_dihedral(0, 1, 2, 3, DihedralType::PROPER);
+    topology.add_dihedral(4, 5, 6, 7, DihedralType::IMPROPER);
+
+    auto dihedrals = topology.get_dihedrals();
+    REQUIRE(dihedrals.size() == 2);
+
+    bool found_proper = false, found_improper = false;
+    for (const auto &dihedral : dihedrals) {
+      REQUIRE(dihedral.atom_indices.size() == 4);
+      if (dihedral.type == DihedralType::PROPER)
+        found_proper = true;
+      if (dihedral.type == DihedralType::IMPROPER)
+        found_improper = true;
+    }
+    REQUIRE(found_proper);
+    REQUIRE(found_improper);
+  }
+}
+
+TEST_CASE("Automatic Generation from Bonds", "[topology][generation]") {
+  Topology topology;
+
+  SECTION("Generate angles from bonds") {
+    // Create a bent molecule: 0-1-2
+    topology.add_bond(0, 1, 1.0);
+    topology.add_bond(1, 2, 1.0);
+
+    topology.generate_angles_from_bonds();
+    REQUIRE(topology.num_angles() == 1);
+    REQUIRE(topology.has_angle(0, 1, 2));
+  }
+
+  SECTION("Generate proper dihedrals from bonds") {
+    // Create a chain: 0-1-2-3
+    topology.add_bond(0, 1, 1.0);
+    topology.add_bond(1, 2, 1.0);
+    topology.add_bond(2, 3, 1.0);
+
+    topology.generate_proper_dihedrals_from_bonds();
+    auto dihedrals = topology.get_dihedrals();
+    REQUIRE(topology.num_proper_dihedrals() == 1);
+    REQUIRE(topology.has_dihedral(0, 1, 2, 3));
+  }
+
+  SECTION("Generate improper dihedrals from bonds") {
+    // Create a tetrahedral center: 1-0, 2-0, 3-0 (center at 0)
+    topology.add_bond(0, 1, 1.0);
+    topology.add_bond(0, 2, 1.0);
+    topology.add_bond(0, 3, 1.0);
+
+    topology.generate_improper_dihedrals_from_bonds();
+    REQUIRE(topology.num_improper_dihedrals() == 1);
+  }
+
+  SECTION("Generate all from bonds") {
+    auto atoms = create_linear_molecule();
+    Topology topology(atoms);
+
+    // Linear H-C-C-H should have:
+    // - 3 bonds (H-C, C-C, C-H)
+    // - 2 angles (H-C-C, C-C-H)
+    // - 1 proper dihedral (H-C-C-H)
+    // - 0 improper dihedrals
+
+    REQUIRE(topology.num_bonds() >= 3);
+    REQUIRE(topology.num_angles() >= 2);
+    REQUIRE(topology.num_proper_dihedrals() >= 1);
+  }
+}
+
+TEST_CASE("Graph Queries", "[topology][graph]") {
+  Topology topology;
+
+  SECTION("Get bonded atoms") {
+    topology.add_bond(0, 1, 1.0);
+    topology.add_bond(0, 2, 1.0);
+    topology.add_bond(0, 3, 1.0);
+
+    auto bonded = topology.get_bonded_atoms(0);
+    REQUIRE(bonded.size() == 3);
+
+    std::sort(bonded.begin(), bonded.end());
+    REQUIRE(bonded == std::vector<size_t>{1, 2, 3});
+
+    // Non-bonded atom should return empty
+    auto empty = topology.get_bonded_atoms(4);
+    REQUIRE(empty.empty());
+  }
+
+  SECTION("Get atoms at distance") {
+    // Create chain: 0-1-2-3-4
+    topology.add_bond(0, 1, 1.0);
+    topology.add_bond(1, 2, 1.0);
+    topology.add_bond(2, 3, 1.0);
+    topology.add_bond(3, 4, 1.0);
+
+    // Distance 0
+    auto dist0 = topology.get_atoms_at_distance(2, 0);
+    REQUIRE(dist0.size() == 1);
+    REQUIRE(dist0[0] == 2);
+
+    // Distance 1
+    auto dist1 = topology.get_atoms_at_distance(2, 1);
+    REQUIRE(dist1.size() == 2);
+    std::sort(dist1.begin(), dist1.end());
+    REQUIRE(dist1 == std::vector<size_t>{1, 3});
+
+    // Distance 2
+    auto dist2 = topology.get_atoms_at_distance(2, 2);
+    REQUIRE(dist2.size() == 2);
+    std::sort(dist2.begin(), dist2.end());
+    REQUIRE(dist2 == std::vector<size_t>{0, 4});
+
+    // Distance 3 (beyond end of chain)
+    auto dist3 = topology.get_atoms_at_distance(2, 3);
+    REQUIRE(dist3.empty());
+  }
+}
+
+TEST_CASE("Connected Components and Molecules", "[topology][molecules]") {
+  SECTION("Single connected component") {
+    auto atoms = create_test_atoms();
+    Topology topology(atoms);
+
+    auto molecules = topology.extract_molecules();
+    REQUIRE(molecules.size() == 1);
+    REQUIRE(molecules[0].size() == 5); // C + 4H
+  }
+
+  SECTION("Multiple disconnected components") {
+    auto atoms = create_disconnected_atoms();
+    Topology topology(atoms);
+
+    auto molecules = topology.extract_molecules();
+    REQUIRE(molecules.size() == 2);
+    REQUIRE(molecules[0].size() == 2); // H2
+    REQUIRE(molecules[1].size() == 2); // H2
+  }
+
+  SECTION("Empty topology") {
+    std::vector<Atom> empty_atoms;
+    Topology topology(empty_atoms);
+
+    auto molecules = topology.extract_molecules();
+    REQUIRE(molecules.empty());
+  }
+}
+
+TEST_CASE("Topology Validation", "[topology][validation]") {
+  Topology topology;
+
+  SECTION("Valid topology") {
+    topology.add_bond(0, 1, 1.0);
+    topology.add_bond(1, 2, 1.0);
+    topology.add_angle(0, 1, 2);
+    topology.add_dihedral(0, 1, 2, 3, DihedralType::PROPER);
+
+    REQUIRE(topology.validate_topology());
+    auto issues = topology.check_issues();
+    REQUIRE(issues.empty());
+  }
+
+  SECTION("Invalid angles") {
+    // Same atom indices in angle
+    topology.add_angle(1, 1, 2); // center same as end
+
+    REQUIRE_FALSE(topology.validate_topology());
+    auto issues = topology.check_issues();
+    REQUIRE_FALSE(issues.empty());
+  }
+
+  SECTION("Invalid dihedrals") {
+    // Duplicate atom indices in dihedral
+    topology.add_dihedral(1, 1, 2, 3, DihedralType::PROPER);
+
+    REQUIRE_FALSE(topology.validate_topology());
+    auto issues = topology.check_issues();
+    REQUIRE_FALSE(issues.empty());
+  }
+}
+
+TEST_CASE("Topology String Representation", "[topology][string]") {
+  Topology topology;
+  topology.add_bond(0, 1, 1.0);
+  topology.add_bond(1, 2, 1.0);
+  topology.generate_all_from_bonds();
+
+  SECTION("String representation") {
+    std::string str = topology.to_string();
+    REQUIRE_FALSE(str.empty());
+    REQUIRE(str.find("Topology") != std::string::npos);
+    REQUIRE(str.find("bonds=") != std::string::npos);
+    REQUIRE(str.find("angles=") != std::string::npos);
+  }
+}
+
+TEST_CASE("Bond Graph Access", "[topology][bondgraph]") {
+  auto atoms = create_test_atoms();
+  Topology topology(atoms);
+
+  SECTION("Const access to bond graph") {
+    const auto &bond_graph = topology.get_bond_graph();
+    const auto &adj_list = bond_graph.get_adjacency_list();
+    REQUIRE_FALSE(adj_list.empty());
+  }
+
+  SECTION("Mutable access to bond graph") {
+    auto &bond_graph = topology.get_bond_graph();
+    Bond new_bond(2.0);
+    bond_graph.add_edge(10, 11, new_bond);
+
+    // Should be able to modify through reference
+    const auto &adj_list = bond_graph.get_adjacency_list();
+    REQUIRE(adj_list.find(10) != adj_list.end());
+  }
+}
+
+TEST_CASE("Edge Cases and Error Handling", "[topology][edge_cases]") {
+  SECTION("Operations on empty topology") {
+    Topology topology;
+
+    REQUIRE(topology.get_bonded_atoms(0).empty());
+    REQUIRE(topology.get_atoms_at_distance(0, 1).empty());
+    REQUIRE_FALSE(topology.has_bond(0, 1));
+    REQUIRE_FALSE(topology.has_angle(0, 1, 2));
+    REQUIRE_FALSE(topology.has_dihedral(0, 1, 2, 3));
+  }
+
+  SECTION("Large atom indices") {
+    Topology topology;
+    topology.add_bond(1000, 2000, 1.0);
+
+    REQUIRE(topology.has_bond(1000, 2000));
+    REQUIRE(topology.num_bonds() == 1);
+  }
+
+  SECTION("Self-loops and invalid operations") {
+    Topology topology;
+
+    // Self-bond (though this should be handled by validation)
+    topology.add_bond(0, 0, 1.0);
+    REQUIRE(topology.num_bonds() == 1);
+
+    // Self-angle (invalid)
+    topology.add_angle(0, 0, 1);
+    auto issues = topology.check_issues();
+    REQUIRE_FALSE(issues.empty());
+  }
+}
+
+TEST_CASE("Performance and Memory", "[topology][performance]") {
+  SECTION("Large number of bonds") {
+    Topology topology;
+
+    // Add many bonds
+    const size_t num_bonds = 1000;
+    for (size_t i = 0; i < num_bonds; ++i) {
+      topology.add_bond(i, i + num_bonds, 1.0);
+    }
+
+    REQUIRE(topology.num_bonds() == num_bonds);
+
+    // Clear should work efficiently
+    topology.clear_bonds();
+    REQUIRE(topology.num_bonds() == 0);
+  }
+
+  SECTION("Complex molecule generation") {
+    // Create a more complex branched molecule
+    std::vector<Atom> atoms;
+    for (int i = 0; i < 20; ++i) {
+      atoms.emplace_back(Vec3{static_cast<double>(i), 0.0, 0.0}, "C", i);
+    }
+
+    Topology topology(atoms);
+    topology.generate_all_from_bonds();
+
+    // Should handle generation without issues
+    REQUIRE(topology.validate_topology());
+  }
+}

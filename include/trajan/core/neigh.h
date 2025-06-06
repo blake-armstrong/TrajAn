@@ -13,37 +13,6 @@
 
 namespace trajan::core {
 
-// struct Entity {
-//   size_t idx;
-//   double x, y, z;
-//
-//   Entity(const size_t idx, const Vec3 &pos) {
-//     this->idx = idx;
-//     this->x = pos.x();
-//     this->y = pos.y();
-//     this->z = pos.z();
-//   }
-//   Entity(const Atom &atom) {
-//     this->idx = atom.index;
-//     this->x = atom.x;
-//     this->y = atom.y;
-//     this->z = atom.z;
-//   }
-//   Entity(const Molecule &molecule) {
-//     this->idx = molecule.index;
-//     this->x = molecule.x;
-//     this->y = molecule.y;
-//     this->z = molecule.z;
-//   }
-//
-//   inline Vec3 position() const { return {this->x, this->y, this->z}; }
-//
-//   inline double square_distance(const Entity &other) const {
-//     double dx = other.x - x, dy = other.y - y, dz = other.z - z;
-//     return dx * dx + dy * dy + dz * dz;
-//   }
-// };
-
 struct Entity {
   size_t idx;
   double x, y, z;
@@ -102,8 +71,9 @@ struct NeighbourListPacket {
   Mat3N wrapped_cart_pos;
   Mat3N wrapped_frac_pos;
   std::vector<Entity::Type> obj_types;
-  std::vector<std::bitset<8>> presence_tracker;
+  std::vector<size_t> presence_tracker;
   bool check_presence{false};
+  ankerl::unordered_dense::map<size_t, size_t> index_to_canonical;
 
   NeighbourListPacket() = default;
   NeighbourListPacket(const std::vector<Entity::Type> &obj_types,
@@ -125,6 +95,17 @@ struct NeighbourListPacket {
       throw std::runtime_error(
           "Entities vector and position matrix not same size.");
     };
+  }
+
+  inline bool are_same_entity(size_t idx1, size_t idx2) const {
+    auto it1 = index_to_canonical.find(idx1);
+    auto it2 = index_to_canonical.find(idx2);
+
+    if (it1 == index_to_canonical.end() || it2 == index_to_canonical.end()) {
+      return false;
+    }
+
+    return it1->second == it2->second;
   }
 
   // void print() const {

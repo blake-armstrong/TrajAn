@@ -83,7 +83,7 @@ bool PDBHandler::parse_pdb(core::Frame &frame) {
       exact = false;
       element_identifier = name_buffer;
     }
-    atom.element = core::element::Element(element_identifier, exact);
+    atom.element = core::Element(element_identifier, exact);
     atom.index = atoms.size();
     atoms.push_back(atom);
   }

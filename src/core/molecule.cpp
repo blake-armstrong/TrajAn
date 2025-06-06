@@ -22,6 +22,9 @@ Molecule::Molecule(const graph::ConnectedComponent<Atom, Bond> &cc) {
   auto bonds = cc.get_edges();
   m_elements.reserve(atoms.size());
   m_atoms.reserve(atoms.size());
+  m_atomic_numbers.resize(atoms.size());
+  m_positions.resize(3, atoms.size());
+  m_partial_charges.resize(atoms.size(), 0.0);
   size_t i = 0;
   for (const auto &[idx, atom] : atoms) {
     m_atoms.push_back(atom);
@@ -38,6 +41,7 @@ Molecule::Molecule(const graph::ConnectedComponent<Atom, Bond> &cc) {
     bond.idxs = p;
     m_bonds.push_back(bond);
   }
+  this->type = "UNK";
 };
 
 Vec Molecule::atomic_masses() const {

@@ -63,7 +63,7 @@ private:
   std::string m_name{""};
   std::vector<Atom> m_atoms;
   std::vector<Bond> m_bonds;
-  std::vector<element::Element> m_elements;
+  std::vector<Element> m_elements;
   IVec m_atomic_numbers;
   Mat3N m_positions;
   Vec m_partial_charges;
