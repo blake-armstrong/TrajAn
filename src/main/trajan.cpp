@@ -12,7 +12,7 @@ int main(int argc, char *argv[]) {
   // logging verbosity
   auto *verbosity_option = app.add_flag_function(
       "--verbosity{2}",
-      [](int verbosity) { trajan::log::setup_logging(verbosity); },
+      [](int verbosity) { trajan::log::set_log_level(verbosity); },
       "logging verbosity {0=silent,1=minimal,2=normal,3=verbose,4=debug} "
       "usage: --verbosity=?");
   verbosity_option->default_val(2);

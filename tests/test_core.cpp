@@ -698,6 +698,7 @@ TEST_CASE("Topology Construction", "[topology][construction]") {
 }
 
 TEST_CASE("Bond Management", "[topology][bonds]") {
+  // TODO: Catch warnings from spdlog
   Topology topology;
 
   SECTION("Adding bonds") {

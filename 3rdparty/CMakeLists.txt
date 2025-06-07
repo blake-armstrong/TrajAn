@@ -37,3 +37,12 @@ if("${eigen3_ADDED}")
   add_library(Eigen3::Eigen INTERFACE IMPORTED GLOBAL)
   target_include_directories(Eigen3::Eigen INTERFACE "${eigen3_SOURCE_DIR}")
 endif()
+
+if("${WITH_PYTHON_BINDINGS}")
+CPMAddPackage(
+    NAME nanobind
+    GITHUB_REPOSITORY "wjakob/nanobind"
+    GIT_TAG "v2.4.0"
+)
+endif()
+

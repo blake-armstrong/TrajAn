@@ -23,6 +23,17 @@ endif()
 
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+  option(WITH_PYTHON_BINDINGS "Build python bindings" OFF)
+endif()
+
+if("${WITH_PYTHON_BINDINGS}")
+    find_package(Python REQUIRED COMPONENTS Interpreter Development.Module
+	OPTIONAL_COMPONENTS Development.SABIModule)
+    message(STATUS "Enabled python bindings, setting CMAKE_POSITION_INDEPENDENT_CODE globally")
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
+
 # option(USE_OPENMP "Use OpenMP for threading" ON)
 find_package(OpenMP)
 
