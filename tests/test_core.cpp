@@ -15,6 +15,9 @@
 #include <trajan/core/trajectory.h>
 #include <trajan/core/unit_cell.h>
 #include <trajan/core/units.h>
+#include <trajan/io/pdb.h>
+
+namespace fs = std::filesystem;
 #include <trajan/io/selection.h>
 #include <vector>
 
@@ -1090,6 +1093,32 @@ TEST_CASE("Edge Cases and Error Handling", "[topology][edge_cases]") {
     topology.add_angle(0, 0, 1);
     auto issues = topology.check_issues();
     REQUIRE_FALSE(issues.empty());
+  }
+}
+
+TEST_CASE("Trajectory and Topology Integration", "[trajectory][topology]") {
+  SECTION("Load PDB and check topology") {
+    Trajectory trajectory;
+    std::vector<fs::path> files = {"/Users/blake/git/TrajAn/examples/coord.pdb"};
+    trajectory.load_files(files);
+
+    REQUIRE(trajectory.next_frame());
+
+    const Topology &topology = trajectory.get_topology();
+
+    // For a typical water box, we expect many bonds, angles, and molecules
+    // The exact numbers depend on the PDB content and bond detection logic
+    // Let's assume some reasonable minimums for a non-empty PDB
+    REQUIRE(topology.num_bonds() > 0);
+    REQUIRE(topology.num_angles() > 0);
+    // Dihedrals might be 0 for simple water, but good to check if any are found
+    // REQUIRE(topology.num_dihedrals() >= 0);
+
+    auto molecules = topology.extract_molecules();
+    REQUIRE(molecules.size() > 0); // Should find water molecules
+
+    // Check if the number of atoms in the topology matches the frame
+    REQUIRE(topology.get_bond_graph().num_nodes() == trajectory.num_atoms());
   }
 }
 

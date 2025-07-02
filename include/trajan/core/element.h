@@ -6,6 +6,10 @@
 
 namespace trajan::core {
 
+namespace runtime_values {
+extern double max_cov_cutoff;
+}
+
 class ElementData {
 public:
   // Initialisor lists.

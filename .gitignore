@@ -4,3 +4,4 @@ CMakeLists.txt.user
 .cache/
 .DS_Store
 .pytest_cache/
+__pycache__/

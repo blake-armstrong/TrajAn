@@ -9,13 +9,59 @@
 #include <trajan/core/atom.h>
 #include <trajan/core/molecule.h>
 #include <trajan/core/topology.h>
+#include <trajan/core/trajectory.h>
 
 using namespace trajan::core;
+using trajan::Vec3;
 
 nb::module_ register_core_bindings(nb::module_ &m) {
   using namespace nb::literals;
 
   m.doc() = "Trajan Core Module";
+
+  nb::class_<Element>(m, "Element")
+      .def(nb::init<const std::string &>())
+      .def(nb::init<int>())
+      .def_prop_ro("symbol", &Element::symbol,
+                   "The symbol of the element e.g. H, He ...")
+      .def_prop_ro("mass", &Element::mass,
+                   "Mass number of the element e.g. 12.01 for C")
+      .def_prop_ro("name", &Element::name,
+                   "The name of the element e.g hydrogen, helium...")
+      .def_prop_ro("covalent_radius", &Element::covalent_radius,
+                   "Covalent radius for element")
+      .def_prop_ro("atomic_number", &Element::atomic_number,
+                   "Atomic number e.g. 1, 2 ...")
+      .def("__gt__", &Element::operator>)
+      .def("__lt__", &Element::operator<)
+      .def("__eq__", &Element::operator==)
+      .def("__ne__", &Element::operator!=)
+      .def("__repr__",
+           [](const Element &a) { return "<Element '" + a.symbol() + "'>"; });
+
+  nb::class_<Atom>(m, "Atom")
+      .def(nb::init<const Vec3 &, int, int>())
+      .def_prop_rw("position", &Atom::position, &Atom::update_position,
+                   "Cartesian position of the atom")
+      .def_prop_ro(
+          "element", [](const Atom &a) { return a.element; }, "Atom's element")
+      .def("__repr__", [](const Atom &a) {
+        return fmt::format("<Atom {} [{:.5f}, {:.5f}, {:.5f}>", a.index, a.x,
+                           a.y, a.z);
+      });
+
+  nb::class_<Molecule>(m, "Molecule")
+      .def(nb::init<const std::vector<Atom> &>())
+      .def(nb::init<const graph::ConnectedComponent<Atom, Bond> &>())
+      .def("__len__", &Molecule::size)
+      .def("atomic_masses", &Molecule::atomic_masses)
+      .def("centre_of_mass", &Molecule::centre_of_mass)
+      .def("centroid", &Molecule::centroid)
+      .def("__repr__", [](const Molecule &mol) {
+        auto com = mol.centre_of_mass();
+        return fmt::format("<Molecule {} @[{:.5f}, {:.5f}, {:.5f}]>", mol.type,
+                           com.x(), com.y(), com.z());
+      });
 
   // Bond structure
   nb::class_<Bond>(m, "Bond")
@@ -170,6 +216,36 @@ nb::module_ register_core_bindings(nb::module_ &m) {
       // String representation
       .def("__repr__", &Topology::to_string)
       .def("__str__", &Topology::to_string);
+
+  nb::class_<Trajectory>(m, "Trajectory")
+      .def(nb::init<>())
+      .def("load_files",
+           [](Trajectory &self, const nb::list &file_paths) {
+             std::vector<std::filesystem::path> paths;
+             for (auto item : file_paths) {
+               if (nb::isinstance<nb::str>(item)) {
+                 paths.emplace_back(nb::cast<std::string>(item));
+               } else if (nb::hasattr(item, "__fspath__")) {
+                 auto path_str = item.attr("__fspath__")();
+                 paths.emplace_back(nb::cast<std::string>(path_str));
+               } else {
+                 throw std::runtime_error(
+                     "Each item must be a string or pathlib.Path object");
+               }
+             }
+             self.load_files(paths);
+           })
+      .def("next_frame", &Trajectory::next_frame)
+      .def("reset", &Trajectory::reset)
+      .def_prop_ro("has_frames", &Trajectory::has_frames)
+      .def_prop_ro("current_frame_index", &Trajectory::current_frame_index)
+      .def_prop_ro("frame", &Trajectory::frame)
+      .def_prop_ro("atoms", &Trajectory::atoms)
+      .def_prop_ro("num_atoms", &Trajectory::num_atoms)
+      .def_prop_ro("unit_cell", &Trajectory::unit_cell)
+      .def_prop_ro("topology", &Trajectory::get_topology)
+      .def("update_topology", &Trajectory::update_topology)
+      .def("extract_molecules", &Trajectory::extract_molecules); //
 
   // Utility functions
   m.def("dihedral_type_to_string", &dihedral_type_to_string, "type"_a,

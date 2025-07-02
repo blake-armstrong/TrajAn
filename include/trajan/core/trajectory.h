@@ -16,31 +16,47 @@ namespace fs = std::filesystem;
 class Trajectory {
 
 public:
+  Trajectory(const Trajectory &) = delete;
+  Trajectory &operator=(const Trajectory &) = delete;
+
+  Trajectory(Trajectory &&) = default;
+  Trajectory &operator=(Trajectory &&) = default;
+
   Trajectory() = default;
   ~Trajectory();
 
   void load_files(const std::vector<fs::path> &files);
 
   bool next_frame();
+
   void reset();
+
   inline bool has_frames() const {
     return !m_handlers.empty() && m_current_handler_index < m_handlers.size();
   }
+
   inline size_t current_frame_index() const { return m_current_frame_index; }
 
   inline Frame &frame() { return m_frame; }
+
   inline const std::vector<Atom> &atoms() const { return m_frame.atoms(); }
+
   inline size_t num_atoms() const { return m_frame.num_atoms(); }
 
   inline const UnitCell &unit_cell() const { return m_frame.unit_cell(); }
 
-  void update_topology();
-  void update_topology(std::vector<Atom> &atoms);
-  const std::vector<Molecule> &unit_cell_molecules();
+  const std::vector<Molecule> &extract_molecules();
 
   std::vector<EntityType> get_entities(const io::SelectionCriteria &selection);
+
   std::vector<EntityType>
   get_entities(const std::vector<io::SelectionCriteria> &selections);
+
+  const Topology &get_topology();
+
+  void update_topology();
+
+  void update_molecules();
 
 private:
   bool m_guess_connectivity{true};
@@ -53,21 +69,18 @@ private:
 
   bool advance_to_next_available_frame();
 
-  void update_neigh();
-  void update_neigh(const UnitCell &unit_cell, double rcut, size_t threads);
-  void update_neigh_uc(const UnitCell &unit_cell);
-  void update_neigh_rcut(double rcut);
-  void update_neigh_threads(size_t threads);
+  // void update_neigh();
+  // void update_neigh(const UnitCell &unit_cell, double rcut, size_t threads);
+  // void update_neigh_uc(const UnitCell &unit_cell);
+  // void update_neigh_rcut(double rcut);
+  // void update_neigh_threads(size_t threads);
+  // void update_unit_cell_topology();
+  // void update_unit_cell_molecules();
 
-  const Topology &get_topology();
-  void update_unit_cell_topology();
-  void update_unit_cell_molecules();
-
-  NeighbourList m_topo_neigh_list;
   Topology m_topology;
-  std::vector<Molecule> m_unit_cell_molecules{};
-  bool m_unit_cell_topology_needs_update{true};
-  bool m_unit_cell_molecules_needs_update{true};
+  std::vector<Molecule> m_molecules{};
+  bool m_topology_needs_update{true};
+  bool m_molecules_needs_update{true};
 };
 
 }; // namespace trajan::core

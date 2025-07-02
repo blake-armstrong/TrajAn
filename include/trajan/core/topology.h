@@ -107,7 +107,11 @@ public:
   Topology(const BondGraph &bond_graph);
   Topology(const std::vector<Atom> &atoms);
 
-  // bond management - delegates to underlying BondGraph
+  inline const std::vector<Atom> &get_atoms() const {
+    return m_bond_graph.nodes();
+  }
+  inline size_t num_atoms() const { return m_bond_graph.num_nodes(); }
+
   void add_bond(size_t atom1, size_t atom2, double bond_length = 0.0);
   void remove_bond(size_t atom1, size_t atom2);
   bool has_bond(size_t atom1, size_t atom2) const;

@@ -4,12 +4,16 @@
 
 namespace trajan::core {
 
+namespace runtime_values {
+
 ElementData *max_element =
     std::max_element(std::begin(ELEMENTDATA_TABLE), std::end(ELEMENTDATA_TABLE),
                      [](const ElementData &a, const ElementData &b) {
                        return a.covalent_radius < b.covalent_radius;
                      });
-double cov_cutoff = max_element->covalent_radius * max_element->covalent_radius;
+double max_cov_cutoff = max_element->covalent_radius;
+
+} // namespace runtime_values
 
 Element::Element(int num) : m_data(ELEMENTDATA_TABLE[0]) {
   if (num > ELEMENT_MAX) {

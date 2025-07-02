@@ -19,6 +19,10 @@ public:
   Graph() = default;
   Graph(const std::vector<NodeType> &nodes) : m_nodes(nodes) {}
 
+  inline const std::vector<NodeType> &nodes() const { return m_nodes; }
+
+  inline size_t num_nodes() const { return m_nodes.size(); }
+
   inline std::vector<ConnectedComponent> find_connected_components() const {
     std::vector<ConnectedComponent> components;
     components.clear();

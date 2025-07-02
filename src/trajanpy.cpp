@@ -1,5 +1,4 @@
 #include "python/core_bindings.h"
-#include "python/trajectory_bindings.h"
 #include <nanobind/nanobind.h>
 #include <trajan/core/log.h>
 
@@ -10,7 +9,6 @@ namespace nb = nanobind;
 
 NB_MODULE(_trajanpy, m) {
   auto core = register_core_bindings(m);
-  register_trajectory_bindings(m);
 
   nb::enum_<spdlog::level::level_enum>(m, "LogLevel")
       .value("TRACE", spdlog::level::level_enum::trace)

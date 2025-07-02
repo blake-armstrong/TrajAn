@@ -1,5 +1,6 @@
 #include <optional>
 #include <stdexcept>
+#include <trajan/core/element.h>
 #include <trajan/core/graph.h>
 #include <trajan/core/log.h>
 #include <trajan/core/molecule.h>
@@ -12,6 +13,8 @@
 #include <vector>
 
 namespace trajan::core {
+
+using runtime_values::max_cov_cutoff;
 
 Trajectory::~Trajectory() {
   for (auto &handler : m_handlers) {
@@ -76,29 +79,29 @@ void Trajectory::reset() {
   m_frame_loaded = false;
 }
 
-void Trajectory::update_neigh_uc(const UnitCell &unit_cell) {
-  // TODO: compare with current uc to see if it needs updating
-  m_topo_neigh_list.update_uc(unit_cell);
-}
-
-void Trajectory::update_neigh_rcut(double rcut) {
-  // TODO: compare with current rcut to see if it needs updating
-  m_topo_neigh_list.update_rcut(rcut);
-}
-
-void Trajectory::update_neigh_threads(size_t threads) {
-  // TODO: compare with current threads to see if it needs updating
-  m_topo_neigh_list.update_threads(threads);
-}
-
-void Trajectory::update_neigh() {
-  m_topo_neigh_list.update_uc(this->unit_cell());
-}
-
-void Trajectory::update_neigh(const UnitCell &unit_cell, double rcut,
-                              size_t threads) {
-  m_topo_neigh_list = NeighbourList(unit_cell, rcut, threads);
-}
+// void Trajectory::update_neigh_uc(const UnitCell &unit_cell) {
+//   // TODO: compare with current uc to see if it needs updating
+//   m_topo_neigh_list.update_uc(unit_cell);
+// }
+//
+// void Trajectory::update_neigh_rcut(double rcut) {
+//   // TODO: compare with current rcut to see if it needs updating
+//   m_topo_neigh_list.update_rcut(rcut);
+// }
+//
+// void Trajectory::update_neigh_threads(size_t threads) {
+//   // TODO: compare with current threads to see if it needs updating
+//   m_topo_neigh_list.update_threads(threads);
+// }
+//
+// void Trajectory::update_neigh() {
+//   m_topo_neigh_list.update_uc(this->unit_cell());
+// }
+//
+// void Trajectory::update_neigh(const UnitCell &unit_cell, double rcut,
+//                               size_t threads) {
+//   m_topo_neigh_list = NeighbourList(unit_cell, rcut, threads);
+// }
 
 std::vector<EntityType>
 Trajectory::get_entities(const io::SelectionCriteria &selection) {
@@ -112,7 +115,7 @@ Trajectory::get_entities(const io::SelectionCriteria &selection) {
   if (std::holds_alternative<io::MoleculeIndexSelection>(selection) ||
       std::holds_alternative<io::MoleculeTypeSelection>(selection)) {
     // build molecules
-    molecules = this->unit_cell_molecules();
+    molecules = this->extract_molecules();
   }
 
   entities = std::visit(
@@ -144,32 +147,22 @@ Trajectory::get_entities(const std::vector<io::SelectionCriteria> &selections) {
   return entities;
 }
 
-void Trajectory::update_topology() {
-  std::vector<Atom> atoms = this->atoms();
-  m_topology = Topology(atoms);
-}
-
-void Trajectory::update_topology(std::vector<Atom> &atoms) {
-  m_topology = Topology(atoms);
-}
-
 const Topology &Trajectory::get_topology() {
-  if (m_unit_cell_topology_needs_update) {
-    update_unit_cell_topology();
+  if (m_topology_needs_update) {
+    this->update_topology();
   }
   return m_topology;
 }
 
-void Trajectory::update_unit_cell_topology() {
-  this->update_neigh();
-  this->update_topology();
+void Trajectory::update_topology() {
 
   const std::vector<Atom> &atoms = this->atoms();
 
-  m_topo_neigh_list.update(atoms);
+  m_topology = Topology(atoms);
+  size_t threads = 1; // FIXME:
+  NeighbourList nl(this->unit_cell(), max_cov_cutoff, threads);
 
-  // TODO: allow user input tolerance
-  double tol = 0.4;
+  double tol = 0.4; // FIXME:
   NeighbourCallback func = [&](const Entity &ent1, const Entity &ent2,
                                double rsq) {
     const Atom &atom1 = atoms[ent1.idx];
@@ -180,21 +173,21 @@ void Trajectory::update_unit_cell_topology() {
     }
   };
 
-  this->m_topo_neigh_list.iterate_neighbours(func);
+  nl.iterate_neighbours(func);
 
-  m_unit_cell_topology_needs_update = false;
+  m_topology_needs_update = false;
 }
 
-void Trajectory::update_unit_cell_molecules() {
-  m_unit_cell_molecules = get_topology().extract_molecules();
-  m_unit_cell_molecules_needs_update = false;
+void Trajectory::update_molecules() {
+  m_molecules = get_topology().extract_molecules();
+  m_molecules_needs_update = false;
 }
 
-const std::vector<Molecule> &Trajectory::unit_cell_molecules() {
-  if (m_unit_cell_molecules_needs_update) {
-    update_unit_cell_molecules();
+const std::vector<Molecule> &Trajectory::extract_molecules() {
+  if (m_molecules_needs_update) {
+    this->update_molecules();
   }
-  return m_unit_cell_molecules;
+  return m_molecules;
 }
 
 } // namespace trajan::core

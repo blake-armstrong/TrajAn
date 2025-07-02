@@ -6,7 +6,6 @@ if("${WITH_PYTHON_BINDINGS}")
 
 set(PYTHON_BINDING_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/python/core_bindings.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/python/trajectory_bindings.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/trajanpy.cpp"
 )
 

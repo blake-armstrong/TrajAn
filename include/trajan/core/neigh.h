@@ -107,16 +107,6 @@ struct NeighbourListPacket {
 
     return it1->second == it2->second;
   }
-
-  // void print() const {
-  //   for (size_t i = 0; i < entities.size(); i++) {
-  //     trajan::log::debug(fmt::format(
-  //         "NLP: {:>6} {:>8.3f} {:>8.3f} {:>8.3f} {:>8.3f} {:>8.3f} {:>8.3f}",
-  //         i, wrapped_cart_pos.col(i).x(), wrapped_cart_pos.col(i).y(),
-  //         wrapped_cart_pos.col(i).z(), wrapped_frac_pos.col(i).x(),
-  //         wrapped_frac_pos.col(i).y(), wrapped_frac_pos.col(i).z()));
-  //   }
-  // }
 };
 
 using NeighbourCallback =
