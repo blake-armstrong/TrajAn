@@ -1,3 +1,12 @@
+include(FetchContent)
+FetchContent_Declare(
+  cpm
+  GIT_REPOSITORY https://github.com/cpm-cmake/CPM.cmake.git
+  GIT_TAG v0.40.2  # Use latest version
+)
+FetchContent_MakeAvailable(cpm)
+include(${cpm_SOURCE_DIR}/cmake/CPM.cmake)
+
 cpmaddpackage(
   NAME
   fmt

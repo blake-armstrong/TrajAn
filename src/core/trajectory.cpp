@@ -4,6 +4,7 @@
 #include <trajan/core/log.h>
 #include <trajan/core/molecule.h>
 #include <trajan/core/neigh.h>
+#include <trajan/core/topology.h>
 #include <trajan/core/trajectory.h>
 #include <trajan/core/unit_cell.h>
 #include <trajan/io/file_handler.h>
@@ -143,25 +144,25 @@ Trajectory::get_entities(const std::vector<io::SelectionCriteria> &selections) {
   return entities;
 }
 
-void Trajectory::update_bond_graph() {
+void Trajectory::update_topology() {
   std::vector<Atom> atoms = this->atoms();
-  m_bond_graph = BondGraph(atoms);
+  m_topology = Topology(atoms);
 }
 
-void Trajectory::update_bond_graph(std::vector<Atom> &atoms) {
-  m_bond_graph = BondGraph(atoms);
+void Trajectory::update_topology(std::vector<Atom> &atoms) {
+  m_topology = Topology(atoms);
 }
 
-const BondGraph Trajectory::unit_cell_connectivity() {
-  if (m_unit_cell_connectivity_needs_update) {
-    update_unit_cell_connectivity();
+const Topology &Trajectory::get_topology() {
+  if (m_unit_cell_topology_needs_update) {
+    update_unit_cell_topology();
   }
-  return m_bond_graph;
+  return m_topology;
 }
 
-void Trajectory::update_unit_cell_connectivity() {
+void Trajectory::update_unit_cell_topology() {
   this->update_neigh();
-  this->update_bond_graph();
+  this->update_topology();
 
   const std::vector<Atom> &atoms = this->atoms();
 
@@ -175,26 +176,17 @@ void Trajectory::update_unit_cell_connectivity() {
     const Atom &atom2 = atoms[ent2.idx];
     std::optional<Bond> bond = atom1.is_bonded_with_rsq(atom2, rsq, tol);
     if (bond) {
-      m_bond_graph.add_edge(atom1.index, atom2.index, *bond);
+      m_topology.add_bond(atom1.index, atom2.index, bond->bond_length);
     }
   };
 
   this->m_topo_neigh_list.iterate_neighbours(func);
 
-  m_unit_cell_connectivity_needs_update = false;
+  m_unit_cell_topology_needs_update = false;
 }
 
 void Trajectory::update_unit_cell_molecules() {
-  using CC = graph::ConnectedComponent<Atom, Bond>;
-  m_unit_cell_molecules.clear();
-  BondGraph bg = this->unit_cell_connectivity();
-  std::vector<CC> ccs = bg.find_connected_components();
-  for (CC &cc : ccs) {
-    Molecule mol(cc);
-    mol.type = "UNK";
-    mol.index = m_unit_cell_molecules.size();
-    m_unit_cell_molecules.emplace_back(cc);
-  }
+  m_unit_cell_molecules = get_topology().extract_molecules();
   m_unit_cell_molecules_needs_update = false;
 }
 

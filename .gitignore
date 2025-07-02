@@ -3,3 +3,4 @@ CMakeLists.txt.user
 .vscode/
 .cache/
 .DS_Store
+.pytest_cache/

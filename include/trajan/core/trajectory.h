@@ -3,6 +3,7 @@
 #include <trajan/core/frame.h>
 #include <trajan/core/graph.h>
 #include <trajan/core/neigh.h>
+#include <trajan/core/topology.h>
 #include <trajan/core/unit_cell.h>
 #include <trajan/io/file_handler.h>
 #include <trajan/io/selection.h>
@@ -33,8 +34,8 @@ public:
 
   inline const UnitCell &unit_cell() const { return m_frame.unit_cell(); }
 
-  void update_bond_graph();
-  void update_bond_graph(std::vector<Atom> &atoms);
+  void update_topology();
+  void update_topology(std::vector<Atom> &atoms);
   const std::vector<Molecule> &unit_cell_molecules();
 
   std::vector<EntityType> get_entities(const io::SelectionCriteria &selection);
@@ -58,15 +59,14 @@ private:
   void update_neigh_rcut(double rcut);
   void update_neigh_threads(size_t threads);
 
-  const BondGraph unit_cell_connectivity();
-  void update_unit_cell_connectivity();
+  const Topology &get_topology();
+  void update_unit_cell_topology();
   void update_unit_cell_molecules();
 
   NeighbourList m_topo_neigh_list;
-  BondGraph m_bond_graph;
-  std::vector<BondGraph::NodeID> m_bond_graph_ids;
+  Topology m_topology;
   std::vector<Molecule> m_unit_cell_molecules{};
-  bool m_unit_cell_connectivity_needs_update{true};
+  bool m_unit_cell_topology_needs_update{true};
   bool m_unit_cell_molecules_needs_update{true};
 };
 

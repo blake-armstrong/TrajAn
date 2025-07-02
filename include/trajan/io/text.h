@@ -70,7 +70,8 @@ public:
       return false;
     }
 
-    file_stream << fmt::format(format_str, std::forward<Args>(args)...)
+    file_stream << fmt::format(fmt::runtime(format_str),
+                               std::forward<Args>(args)...)
                 << std::endl;
     return file_stream.good();
   }
