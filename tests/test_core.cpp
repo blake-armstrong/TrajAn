@@ -42,6 +42,9 @@ using Entities = std::vector<trajan::core::EntityType>;
 
 namespace units = trajan::units;
 
+fs::path CURRENT = __FILE__;
+fs::path EXAMPLES_DIR = CURRENT.parent_path().parent_path() / "examples";
+
 TEST_CASE("Element constructor with exact matching", "[element]") {
   SECTION("Exact matches are found correctly") {
     auto [input, expected_symbol, expected_number] =
@@ -1099,8 +1102,7 @@ TEST_CASE("Edge Cases and Error Handling", "[topology][edge_cases]") {
 TEST_CASE("Trajectory and Topology Integration", "[trajectory][topology]") {
   SECTION("Load PDB and check topology") {
     Trajectory trajectory;
-    std::vector<fs::path> files = {
-        "/Users/blake/git/TrajAn/examples/coord.pdb"};
+    std::vector<fs::path> files = {EXAMPLES_DIR / "coord.pdb"};
     trajectory.load_files(files);
 
     REQUIRE(trajectory.next_frame());

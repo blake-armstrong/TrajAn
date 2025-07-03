@@ -19,7 +19,6 @@ using runtime_values::max_cov_cutoff;
 Trajectory::~Trajectory() {
   for (auto &handler : m_handlers) {
     if (handler) {
-      trajan::log::critical("hello");
       handler->finalise();
     }
   }
