@@ -19,6 +19,7 @@ using runtime_values::max_cov_cutoff;
 Trajectory::~Trajectory() {
   for (auto &handler : m_handlers) {
     if (handler) {
+      trajan::log::critical("hello");
       handler->finalise();
     }
   }
@@ -155,39 +156,53 @@ const Topology &Trajectory::get_topology() {
 }
 
 void Trajectory::update_topology() {
-
   const std::vector<Atom> &atoms = this->atoms();
+  trajan::log::debug("update_topology: Starting with {} atoms", atoms.size());
 
-  m_topology = Topology(atoms);
+  if (atoms.empty()) {
+    trajan::log::error("No atoms available for topology update");
+    m_topology_needs_update = false;
+    return;
+  }
+
+  trajan::log::debug("Creating BondGraph...");
+  BondGraph bg(atoms);
+  trajan::log::debug("BondGraph created successfully");
   size_t threads = 1; // FIXME:
+  trajan::log::debug("Creating NeighbourList with cutoff {:.3f}",
+                     max_cov_cutoff);
   NeighbourList nl(this->unit_cell(), max_cov_cutoff, threads);
+  trajan::log::debug("NeighbourList created, updating with atoms...");
+
+  nl.update(atoms);
+  trajan::log::debug("NeighbourList updated successfully");
 
   double tol = 0.4; // FIXME:
+  size_t bond_count = 0;
+
   NeighbourCallback func = [&](const Entity &ent1, const Entity &ent2,
                                double rsq) {
     const Atom &atom1 = atoms[ent1.idx];
     const Atom &atom2 = atoms[ent2.idx];
     std::optional<Bond> bond = atom1.is_bonded_with_rsq(atom2, rsq, tol);
     if (bond) {
-      m_topology.add_bond(atom1.index, atom2.index, bond->bond_length);
+      bg.add_edge(atom1.index, atom2.index, bond.value());
+      bond_count++;
     }
   };
 
+  trajan::log::debug("Starting neighbour iteration...");
   nl.iterate_neighbours(func);
-
-  m_topology_needs_update = false;
+  trajan::log::debug("Neighbour iteration complete, found {} bonds",
+                     bond_count);
+  m_topology = Topology(bg);
 }
 
-void Trajectory::update_molecules() {
-  m_molecules = get_topology().extract_molecules();
-  m_molecules_needs_update = false;
-}
-
-const std::vector<Molecule> &Trajectory::extract_molecules() {
-  if (m_molecules_needs_update) {
-    this->update_molecules();
+const std::vector<Molecule> Trajectory::extract_molecules() {
+  if (m_topology_needs_update) {
+    this->update_topology();
   }
-  return m_molecules;
+  return m_topology.extract_molecules();
 }
 
 } // namespace trajan::core

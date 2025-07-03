@@ -1099,7 +1099,8 @@ TEST_CASE("Edge Cases and Error Handling", "[topology][edge_cases]") {
 TEST_CASE("Trajectory and Topology Integration", "[trajectory][topology]") {
   SECTION("Load PDB and check topology") {
     Trajectory trajectory;
-    std::vector<fs::path> files = {"/Users/blake/git/TrajAn/examples/coord.pdb"};
+    std::vector<fs::path> files = {
+        "/Users/blake/git/TrajAn/examples/coord.pdb"};
     trajectory.load_files(files);
 
     REQUIRE(trajectory.next_frame());
@@ -1112,13 +1113,18 @@ TEST_CASE("Trajectory and Topology Integration", "[trajectory][topology]") {
     REQUIRE(topology.num_bonds() > 0);
     REQUIRE(topology.num_angles() > 0);
     // Dihedrals might be 0 for simple water, but good to check if any are found
-    // REQUIRE(topology.num_dihedrals() >= 0);
+    REQUIRE(topology.num_dihedrals() >= 0);
 
     auto molecules = topology.extract_molecules();
     REQUIRE(molecules.size() > 0); // Should find water molecules
 
     // Check if the number of atoms in the topology matches the frame
-    REQUIRE(topology.get_bond_graph().num_nodes() == trajectory.num_atoms());
+    REQUIRE(topology.num_atoms() == trajectory.num_atoms());
+
+    auto molecules2 = trajectory.extract_molecules();
+    REQUIRE(molecules2.size() > 0); // Should find water molecules
+    REQUIRE(molecules2.size() ==
+            molecules.size()); // Should find water molecules
   }
 }
 

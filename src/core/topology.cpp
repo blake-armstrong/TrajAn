@@ -328,7 +328,7 @@ std::vector<size_t> Topology::get_atoms_at_distance(size_t atom_idx,
 }
 
 std::vector<Molecule> Topology::extract_molecules() const {
-  std::vector<Molecule> molecules;
+  std::vector<Molecule> molecules{};
 
   auto components = m_bond_graph.find_connected_components();
 

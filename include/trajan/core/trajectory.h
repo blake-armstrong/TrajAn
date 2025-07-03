@@ -45,7 +45,7 @@ public:
 
   inline const UnitCell &unit_cell() const { return m_frame.unit_cell(); }
 
-  const std::vector<Molecule> &extract_molecules();
+  const std::vector<Molecule> extract_molecules();
 
   std::vector<EntityType> get_entities(const io::SelectionCriteria &selection);
 
@@ -55,8 +55,6 @@ public:
   const Topology &get_topology();
 
   void update_topology();
-
-  void update_molecules();
 
 private:
   bool m_guess_connectivity{true};
@@ -77,10 +75,9 @@ private:
   // void update_unit_cell_topology();
   // void update_unit_cell_molecules();
 
-  Topology m_topology;
-  std::vector<Molecule> m_molecules{};
-  bool m_topology_needs_update{true};
-  bool m_molecules_needs_update{true};
+  mutable Topology m_topology;
+  mutable std::vector<Molecule> m_molecules{};
+  mutable bool m_topology_needs_update{true};
 };
 
 }; // namespace trajan::core

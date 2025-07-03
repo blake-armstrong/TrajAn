@@ -107,6 +107,33 @@ public:
   Topology(const BondGraph &bond_graph);
   Topology(const std::vector<Atom> &atoms);
 
+  Topology &operator=(const Topology &) = default;
+
+  // Topology &operator=(const Topology &other) {
+  //   if (this == &other)
+  //     return *this;
+  //
+  //   trajan::log::critical("Copying m_bond_graph");
+  //   m_bond_graph = other.m_bond_graph;
+  //
+  //   trajan::log::critical("Copying m_angles");
+  //   m_angles = other.m_angles;
+  //
+  //   trajan::log::critical("Copying m_dihedrals");
+  //   m_dihedrals = other.m_dihedrals;
+  //
+  //   trajan::log::critical("Copying m_angle_set");
+  //   m_angle_set = other.m_angle_set;
+  //
+  //   trajan::log::critical("Copying m_dihedral_set");
+  //   m_dihedral_set = other.m_dihedral_set;
+  //
+  //   trajan::log::critical("Copying m_bond_storage");
+  //   m_bond_storage = other.m_bond_storage;
+  //
+  //   return *this;
+  // }
+
   inline const std::vector<Atom> &get_atoms() const {
     return m_bond_graph.nodes();
   }
