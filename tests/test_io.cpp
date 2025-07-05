@@ -1,12 +1,22 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <filesystem>
+#include <fstream>
+#include <trajan/core/trajectory.h>
 #include <trajan/io/selection.h>
 
+namespace fs = std::filesystem;
+
+using trajan::core::Trajectory;
 using trajan::io::AtomIndexSelection;
 using trajan::io::AtomTypeSelection;
 using trajan::io::MoleculeIndexSelection;
 using trajan::io::MoleculeTypeSelection;
 using trajan::io::SelectionParser;
+
+fs::path CURRENT = __FILE__;
+fs::path EXAMPLES_DIR = CURRENT.parent_path().parent_path() / "examples";
 
 TEST_CASE("Selection Parser - Index Selection", "[selection][index]") {
   SECTION("Single index") {
@@ -172,4 +182,114 @@ TEST_CASE("Selection Parser - Edge Cases", "[selection][edge]") {
         },
         *result);
   }
+}
+
+TEST_CASE("PDB Read/Write", "[io][pdb]") {
+  fs::path temp_pdb = EXAMPLES_DIR / "test_write.pdb";
+
+  Trajectory traj_read;
+  std::vector<fs::path> files = {EXAMPLES_DIR / "coord.pdb"};
+  traj_read.load_files(files);
+  REQUIRE(traj_read.next_frame());
+
+  traj_read.set_output_file(temp_pdb);
+  traj_read.write_frame();
+
+  Trajectory traj_write;
+  std::vector<fs::path> written_files = {temp_pdb};
+  traj_write.load_files(written_files);
+  REQUIRE(traj_write.next_frame());
+
+  std::ifstream temp_file(temp_pdb);
+  std::string temp_content((std::istreambuf_iterator<char>(temp_file)),
+                           std::istreambuf_iterator<char>());
+  INFO("Temporary PDB content:\n" << temp_content);
+  REQUIRE(!temp_content.empty());
+
+  Trajectory traj_read_original;
+  std::vector<fs::path> original_files = {EXAMPLES_DIR / "coord.pdb"};
+  traj_read_original.load_files(original_files);
+  REQUIRE(traj_read_original.next_frame());
+
+  const auto &atoms_read = traj_read_original.atoms();
+  const auto &atoms_write = traj_write.atoms();
+  REQUIRE(atoms_read.size() == atoms_write.size());
+
+  for (size_t i = 0; i < atoms_read.size(); ++i) {
+    REQUIRE_THAT(atoms_read[i].x,
+                 Catch::Matchers::WithinAbs(atoms_write[i].x, 1e-3));
+    REQUIRE_THAT(atoms_read[i].y,
+                 Catch::Matchers::WithinAbs(atoms_write[i].y, 1e-3));
+    REQUIRE_THAT(atoms_read[i].z,
+                 Catch::Matchers::WithinAbs(atoms_write[i].z, 1e-3));
+  }
+
+  const auto &uc_read = traj_read_original.unit_cell();
+  const auto &uc_write = traj_write.unit_cell();
+  REQUIRE_THAT(uc_read.a(), Catch::Matchers::WithinAbs(uc_write.a(), 1e-3));
+  REQUIRE_THAT(uc_read.b(), Catch::Matchers::WithinAbs(uc_write.b(), 1e-3));
+  REQUIRE_THAT(uc_read.c(), Catch::Matchers::WithinAbs(uc_write.c(), 1e-3));
+  REQUIRE_THAT(uc_read.alpha(),
+               Catch::Matchers::WithinAbs(uc_write.alpha(), 1e-3));
+  REQUIRE_THAT(uc_read.beta(),
+               Catch::Matchers::WithinAbs(uc_write.beta(), 1e-3));
+  REQUIRE_THAT(uc_read.gamma(),
+               Catch::Matchers::WithinAbs(uc_write.gamma(), 1e-3));
+
+  fs::remove(temp_pdb);
+}
+
+TEST_CASE("DCD Read/Write", "[io][dcd]") {
+  fs::path temp_dcd = EXAMPLES_DIR / "test_write.dcd";
+
+  Trajectory traj_read;
+  std::vector<fs::path> files = {EXAMPLES_DIR / "coord.pdb",
+                                 EXAMPLES_DIR / "traj.dcd"};
+  traj_read.load_files(files);
+
+  traj_read.set_output_file(temp_dcd);
+
+  while (traj_read.next_frame()) {
+    if (traj_read.current_frame_index() == 1) {
+      continue;
+    }
+    traj_read.write_frame();
+  }
+
+  Trajectory traj_write;
+  std::vector<fs::path> written_files = {EXAMPLES_DIR / "coord.pdb", temp_dcd};
+  traj_write.load_files(written_files);
+
+  std::vector<std::vector<trajan::core::Atom>> all_atoms_write;
+  while (traj_write.next_frame()) {
+    all_atoms_write.push_back(traj_write.atoms());
+  }
+
+  Trajectory traj_read_original;
+  std::vector<fs::path> original_files = {EXAMPLES_DIR / "coord.pdb",
+                                          EXAMPLES_DIR / "traj.dcd"};
+  traj_read_original.load_files(original_files);
+
+  std::vector<std::vector<trajan::core::Atom>> all_atoms_read;
+  while (traj_read_original.next_frame()) {
+    all_atoms_read.push_back(traj_read_original.atoms());
+  }
+
+  REQUIRE(all_atoms_read.size() == all_atoms_write.size());
+  double tol = 1e-6;
+  for (size_t i = 0; i < all_atoms_read.size(); ++i) {
+    const auto &atoms_read = all_atoms_read[i];
+    const auto &atoms_write = all_atoms_write[i];
+    REQUIRE(atoms_read.size() == atoms_write.size());
+    for (size_t j = 0; j < atoms_read.size(); ++j) {
+      REQUIRE_THAT(atoms_read[j].x,
+                   Catch::Matchers::WithinAbs(atoms_write[j].x, tol));
+      REQUIRE_THAT(atoms_read[j].y,
+                   Catch::Matchers::WithinAbs(atoms_write[j].y, tol));
+      REQUIRE_THAT(atoms_read[j].z,
+                   Catch::Matchers::WithinAbs(atoms_write[j].z, tol));
+    }
+  }
+
+  fs::remove(temp_dcd);
 }

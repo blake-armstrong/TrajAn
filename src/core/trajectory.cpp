@@ -22,6 +22,9 @@ Trajectory::~Trajectory() {
       handler->finalise();
     }
   }
+  if (m_output_handler) {
+    m_output_handler->finalise();
+  }
 }
 
 void Trajectory::load_files(const std::vector<fs::path> &files) {
@@ -31,7 +34,12 @@ void Trajectory::load_files(const std::vector<fs::path> &files) {
     throw std::runtime_error("Could not load files.");
   }
 
-  m_handlers[0]->initialise();
+  m_handlers[0]->initialise(io::FileHandler::Mode::Read);
+}
+
+void Trajectory::set_output_file(const fs::path &file) {
+  m_output_handler = io::write_output_file(file);
+  m_output_handler->initialise(io::FileHandler::Mode::Write);
 }
 
 bool Trajectory::next_frame() {
@@ -52,7 +60,7 @@ bool Trajectory::next_frame() {
   m_current_handler_index++;
 
   while (m_current_handler_index < m_handlers.size()) {
-    if (m_handlers[m_current_handler_index]->initialise()) {
+    if (m_handlers[m_current_handler_index]->initialise(io::FileHandler::Mode::Read)) {
       if (m_handlers[m_current_handler_index]->read_frame(m_frame)) {
         m_frame_loaded = true;
         m_current_frame_index++;
@@ -67,6 +75,16 @@ bool Trajectory::next_frame() {
   return false;
 }
 
+void Trajectory::write_frame() {
+  if (!m_output_handler) {
+    throw std::runtime_error("Output file not set.");
+  }
+  if (!m_frame_loaded) {
+    throw std::runtime_error("No frame loaded to write.");
+  }
+  m_output_handler->write_frame(m_frame);
+}
+
 void Trajectory::reset() {
   for (auto &handler : m_handlers) {
     if (handler) {
@@ -78,30 +96,6 @@ void Trajectory::reset() {
   m_current_frame_index = 0;
   m_frame_loaded = false;
 }
-
-// void Trajectory::update_neigh_uc(const UnitCell &unit_cell) {
-//   // TODO: compare with current uc to see if it needs updating
-//   m_topo_neigh_list.update_uc(unit_cell);
-// }
-//
-// void Trajectory::update_neigh_rcut(double rcut) {
-//   // TODO: compare with current rcut to see if it needs updating
-//   m_topo_neigh_list.update_rcut(rcut);
-// }
-//
-// void Trajectory::update_neigh_threads(size_t threads) {
-//   // TODO: compare with current threads to see if it needs updating
-//   m_topo_neigh_list.update_threads(threads);
-// }
-//
-// void Trajectory::update_neigh() {
-//   m_topo_neigh_list.update_uc(this->unit_cell());
-// }
-//
-// void Trajectory::update_neigh(const UnitCell &unit_cell, double rcut,
-//                               size_t threads) {
-//   m_topo_neigh_list = NeighbourList(unit_cell, rcut, threads);
-// }
 
 std::vector<EntityType>
 Trajectory::get_entities(const io::SelectionCriteria &selection) {

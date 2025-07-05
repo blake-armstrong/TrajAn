@@ -15,13 +15,25 @@ namespace core = trajan::core;
 using trajan::units::radians;
 
 bool PDBHandler::_initialise() {
-  m_file.open(this->file_path());
-  return m_file.is_open();
+  if (m_mode == Mode::Read) {
+    m_infile.open(this->file_path());
+    return m_infile.is_open();
+  } else {
+    m_outfile.open(this->file_path());
+    return m_outfile.is_open();
+  }
 }
 
 void PDBHandler::_finalise() {
-  if (m_file.is_open()) {
-    m_file.close();
+  if (m_mode == Mode::Read) {
+    if (m_infile.is_open()) {
+      m_infile.close();
+    }
+  } else {
+    if (m_outfile.is_open()) {
+      m_outfile.flush();
+      m_outfile.close();
+    }
   }
 }
 
@@ -29,7 +41,7 @@ bool PDBHandler::parse_pdb(core::Frame &frame) {
 
   std::vector<core::Atom> atoms;
   std::string line;
-  while (std::getline(m_file, line)) {
+  while (std::getline(m_infile, line)) {
     if (line.substr(0, 6) == "CRYST1") {
       trajan::log::debug("Found unit cell from CRYST1 line in PDB.");
       double a, b, c, alpha, beta, gamma;
@@ -60,7 +72,7 @@ bool PDBHandler::parse_pdb(core::Frame &frame) {
                     &serial, tmp, name_buffer, alt_loc, res_name, tmp, chain_id,
                     &res_seq, ins_code, tmp, &atom.x, &atom.y, &atom.z,
                     &occupancy, &temp_factor, tmp, element_buffer, charge);
-    if (result != 15) {
+    if (result < 16) {
       std::runtime_error(fmt::format("Failed to parse line: '{}'", line));
     }
     name_buffer[4] = '\0';
@@ -102,23 +114,49 @@ bool PDBHandler::read_next_frame(core::Frame &frame) {
   return success;
 }
 
-// void PDBHandler::write_trajectory(const std::string &filename,
-//                                   const core::Trajectory &trajectory) {
-//   std::ofstream file(filename);
-//   if (!file.is_open()) {
-//     throw std::runtime_error("Unable to open file for writing: " + filename);
-//   }
+bool PDBHandler::write_next_frame(const core::Frame &frame) {
+  const auto &atoms = frame.atoms();
+  const auto &uc = frame.unit_cell();
 
-// Write trajectory to file
-// For example:
-// for (const auto &frame : trajectory.get_frames()) {
-//   file << frame.getAtomCount() << "\n";
-//   file << "Frame " << frame.getIndex() << "\n";
-//   for (const auto &atom : frame.getAtoms()) {
-//     file << std::setw(2) << atom.getElement() << " " << std::fixed
-//          << std::setprecision(6) << atom.getX() << " " << atom.getY() << "
-//          "
-//          << atom.getZ() << "\n";
-//   }
-// }
+  if (uc.init()) {
+    m_outfile << fmt::format("CRYST1{:9.3f}{:9.3f}{:9.3f}{:7.2f}{:7.2f}{:7.2f} "
+                             "P 1           1",
+                             uc.a(), uc.b(), uc.c(),
+                             trajan::units::degrees(uc.alpha()),
+                             trajan::units::degrees(uc.beta()),
+                             trajan::units::degrees(uc.gamma()))
+              << std::endl;
+  }
+
+  for (const auto &atom : atoms) {
+    std::string line =
+        fmt::format(PDB_LINE_FMT_WRITE.data(),
+                    "ATOM",                 // field 1: 6 chars
+                    atom.serial,            // field 2: 5 digits
+                    ' ',                    // field 3: 1 char
+                    atom.type,              // field 4: 4 chars
+                    ' ',                    // field 5: 1 char
+                    "RES",                  // field 6: 3 chars (residue name)
+                    ' ',                    // field 7: 1 char
+                    'A',                    // field 8: 1 char (chain ID)
+                    1,                      // field 9: 4 digits (resSeq)
+                    ' ',                    // field 10: 1 char (iCode)
+                    "",                     // field 11: 3 chars (altLoc?)
+                    atom.x, atom.y, atom.z, // 3 coordinates, 8.3f
+                    1.0,                    // occupancy
+                    0.0,                    // tempFactor
+                    "",                     // segment ID (10 chars)
+                    atom.element.symbol(),  // 2 chars
+                    ""                      // charge (2 chars)
+        );
+
+    trajan::log::debug("Writing PDB line: {}", line);
+    m_outfile << line << std::endl;
+  }
+
+  m_outfile << "ENDMDL" << std::endl;
+
+  return true;
+}
+
 }; // namespace trajan::io

@@ -16,14 +16,15 @@ static const std::unordered_map<std::string, std::function<FileHandlerPtr()>>
     handler_map = {{".pdb", []() { return std::make_unique<PDBHandler>(); }},
                    {".dcd", []() { return std::make_unique<DCDHandler>(); }}};
 
-bool FileHandler::initialise() {
+bool FileHandler::initialise(Mode mode) {
+  m_mode = mode;
   bool initialised = this->_initialise();
   if (!initialised) {
     throw std::runtime_error(fmt::format(
-        "Unable to open file for reading: '{}'", this->file_name()));
+        "Unable to open file for {}: '{}'",
+        (mode == Mode::Read) ? "reading" : "writing", this->file_name()));
   }
-  trajan::log::debug(
-      fmt::format("Successfully opened file '{}'", this->file_name()));
+  trajan::log::debug(fmt::format("Successfully opened file '{}'", this->file_name()));
   return initialised;
 }
 
@@ -35,6 +36,10 @@ bool FileHandler::read_frame(core::Frame &frame) {
     return false;
   }
   return this->validate_frame(frame);
+}
+
+bool FileHandler::write_frame(const core::Frame &frame) {
+  return this->write_next_frame(frame);
 }
 
 bool FileHandler::validate_frame(core::Frame &frame) {
@@ -139,6 +144,17 @@ read_input_files(const std::vector<std::string> &filenames) {
     files.push_back(filename);
   }
   return read_input_files(files);
+}
+
+FileHandlerPtr write_output_file(const fs::path &file) {
+  std::string ext = file.extension().string();
+  trajan::log::debug("Attempting to write output to {}, file extension = {}",
+                     file.generic_string(), ext);
+
+  FileHandlerPtr handler = get_handler(ext);
+  handler->set_file_path(file);
+
+  return handler;
 }
 
 } // namespace trajan::io

@@ -26,8 +26,10 @@ public:
   ~Trajectory();
 
   void load_files(const std::vector<fs::path> &files);
+  void set_output_file(const fs::path &file);
 
   bool next_frame();
+  void write_frame();
 
   void reset();
 
@@ -63,21 +65,14 @@ private:
   size_t m_current_frame_index{0};
   bool m_frame_loaded{false};
   std::vector<io::FileHandlerPtr> m_handlers;
+  io::FileHandlerPtr m_output_handler;
   Frame m_frame;
 
   bool advance_to_next_available_frame();
 
-  // void update_neigh();
-  // void update_neigh(const UnitCell &unit_cell, double rcut, size_t threads);
-  // void update_neigh_uc(const UnitCell &unit_cell);
-  // void update_neigh_rcut(double rcut);
-  // void update_neigh_threads(size_t threads);
-  // void update_unit_cell_topology();
-  // void update_unit_cell_molecules();
-
   mutable Topology m_topology;
   mutable std::vector<Molecule> m_molecules{};
   mutable bool m_topology_needs_update{true};
-};
+}; 
 
 }; // namespace trajan::core
