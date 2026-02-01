@@ -1,57 +1,12 @@
-include(FetchContent)
-FetchContent_Declare(
-  cpm
-  GIT_REPOSITORY https://github.com/cpm-cmake/CPM.cmake.git
-  GIT_TAG v0.40.2  # Use latest version
+CPMAddPackage(
+    NAME xtc
+    GITHUB_REPOSITORY "blake-armstrong/libxtc"
+    GIT_TAG v0.0.0
 )
-FetchContent_MakeAvailable(cpm)
-include(${cpm_SOURCE_DIR}/cmake/CPM.cmake)
-
-cpmaddpackage(
-  NAME
-  fmt
-  GITHUB_REPOSITORY
-  "fmtlib/fmt"
-  VERSION
-  "10.2.0"
-  GIT_TAG
-  "10.2.0")
-
-cpmaddpackage(NAME CLI11 GITHUB_REPOSITORY "CLIUtils/CLI11" VERSION "2.4.1")
 
 CPMAddPackage(
-    NAME unordered_dense
-    GITHUB_REPOSITORY "martinus/unordered_dense"
-    VERSION "4.5.0"
+    NAME occ
+    GITHUB_REPOSITORY "peterspackman/occ"
+    GIT_TAG "trajan"
 )
-
-cpmaddpackage(
-  NAME
-  spdlog
-  GITHUB_REPOSITORY
-  "gabime/spdlog"
-  OPTIONS
-  "SPDLOG_FMT_EXTERNAL ON"
-  VERSION
-  "1.12.0")
-
-cpmaddpackage(
-  NAME eigen3 URL
-  "https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.zip"
-  DOWNLOAD_ONLY YES # Eigen CMakelists.txt not intended for library use
-)
-
-# Add the Eigen library target to link against
-if("${eigen3_ADDED}")
-  add_library(Eigen3::Eigen INTERFACE IMPORTED GLOBAL)
-  target_include_directories(Eigen3::Eigen INTERFACE "${eigen3_SOURCE_DIR}")
-endif()
-
-if("${WITH_PYTHON_BINDINGS}")
-CPMAddPackage(
-    NAME nanobind
-    GITHUB_REPOSITORY "wjakob/nanobind"
-    GIT_TAG "v2.4.0"
-)
-endif()
 

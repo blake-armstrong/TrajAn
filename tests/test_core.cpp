@@ -8,6 +8,7 @@
 #include <omp.h>
 #include <random>
 #include <trajan/core/element.h>
+#include <trajan/core/ewald.h>
 #include <trajan/core/linear_algebra.h>
 #include <trajan/core/molecule.h>
 #include <trajan/core/neigh.h>
@@ -16,10 +17,10 @@
 #include <trajan/core/unit_cell.h>
 #include <trajan/core/units.h>
 #include <trajan/io/pdb.h>
-
-namespace fs = std::filesystem;
 #include <trajan/io/selection.h>
 #include <vector>
+
+namespace fs = std::filesystem;
 
 using trajan::Mat3N;
 using trajan::Vec3;
@@ -44,6 +45,26 @@ namespace units = trajan::units;
 
 fs::path CURRENT = __FILE__;
 fs::path EXAMPLES_DIR = CURRENT.parent_path().parent_path() / "examples";
+
+// TEST_CASE("Ewald Summation", "[ewald]") {
+//   const double alpha = 0.25;
+//   const double box_size = 10.0;
+//   UnitCell unit_cell = trajan::core::cubic_cell(box_size);
+//
+//   Mat3N positions(3, 2);
+//   positions.col(0) << 1.0, 2.0, 3.0;
+//   positions.col(1) << 4.0, 5.0, 6.0;
+//
+//   std::vector<double> charges = {1.0, -1.0};
+//
+//   trajan::core::Ewald ewald(alpha);
+//   ewald.update(positions, charges, unit_cell);
+//
+//   const double direct_sum = ewald.reciprocal_sum(false);
+//   const double fft_sum = ewald.reciprocal_sum(true);
+//
+//   REQUIRE(direct_sum == Catch::Approx(fft_sum));
+// }
 
 TEST_CASE("Element constructor with exact matching", "[element]") {
   SECTION("Exact matches are found correctly") {
