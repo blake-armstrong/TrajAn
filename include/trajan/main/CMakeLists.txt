@@ -1,5 +1,6 @@
 set(TRAJAN_MAIN_INCLUDE_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/trajan_load.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/trajan_info.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/trajan_topology.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/trajan_rdf.h"
     # "${CMAKE_CURRENT_SOURCE_DIR}/trajan_opt.h"

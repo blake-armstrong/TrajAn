@@ -1,11 +1,8 @@
 #pragma once
+#include <occ/core/bondgraph.h>
 #include <occ/core/molecule.h>
 #include <string>
 #include <trajan/core/atom.h>
-// #include <trajan/core/element.h>
-// #include <trajan/core/graph.h>
-#include <occ/core/bondgraph.h>
-// #include <trajan/core/linear_algebra.h>
 #include <vector>
 
 namespace trajan::core {

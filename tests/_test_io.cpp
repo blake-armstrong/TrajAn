@@ -1,219 +1,122 @@
-#include <catch2/benchmark/catch_benchmark.hpp>
-#include <catch2/catch_approx.hpp>
-#include <catch2/catch_session.hpp>
+#include "trajan/core/log.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
-#include <catch2/matchers/catch_matchers_vector.hpp>
 #include <filesystem>
 #include <fstream>
-#include <occ/crystal/unitcell.h>
-#include <trajan/core/atomgraph.h>
-#include <trajan/core/log.h>
-#include <trajan/core/molecule.h>
-#include <trajan/core/neigh.h>
-#include <trajan/core/topology.h>
 #include <trajan/core/trajectory.h>
-#include <trajan/io/pdb.h>
 #include <trajan/io/selection.h>
-#include <vector>
 
 namespace fs = std::filesystem;
 
-using occ::Mat3N;
-using occ::Vec3;
-
-using trajan::core::Atom;
-using trajan::core::AtomGraph;
-using trajan::core::Bond;
-using trajan::core::Molecule;
 using trajan::core::Trajectory;
-
 using trajan::io::AtomIndexSelection;
 using trajan::io::AtomTypeSelection;
 using trajan::io::MoleculeIndexSelection;
 using trajan::io::MoleculeTypeSelection;
-using trajan::io::SelectionCriteria;
 using trajan::io::SelectionParser;
 
-static std::string g_test_data_path;
+fs::path CURRENT = __FILE__;
+fs::path EXAMPLES_DIR = CURRENT.parent_path().parent_path() / "examples";
 
-std::string get_test_data_path() { return g_test_data_path; }
-
-bool has_test_data() {
-  return !g_test_data_path.empty() && fs::exists(g_test_data_path);
-}
-
-class TestFixture {
-public:
-  fs::path get_test_file(const fs::path &file) {
-    this->require_test_data();
-    return fs::path(get_test_data_path()) / file;
-  }
-
-  void require_test_data() {
-    if (!has_test_data()) {
-      SKIP("Test data path not provided or doesn't exist. Use --data-path "
-           "<path>");
-    }
-  }
-};
-
-int main(int argc, char *argv[]) {
-  Catch::Session session;
-
-  auto cli = session.cli() |
-             Catch::Clara::Opt(g_test_data_path, "path")["-d"]["--data-path"](
-                 "Path to trajectory test data directory");
-
-  session.cli(cli);
-
-  int result = session.applyCommandLine(argc, argv);
-  if (result != 0)
-    return result;
-
-  if (g_test_data_path.empty()) {
-    trajan::log::info(
-        "No test data path provided. File-based tests will be skipped.");
-    trajan::log::info("Use --data-path <path> to enable all tests.");
-  } else if (!fs::exists(g_test_data_path)) {
-    trajan::log::info("Warning: Test data path doesn't exist: {}",
-                      g_test_data_path);
-    trajan::log::info("File-based tests will be skipped.");
-    g_test_data_path.clear();
-  } else {
-    trajan::log::info("Using test data path: {}", g_test_data_path);
-  }
-
-  return session.run();
-}
-
-// tests that dont require files
-
-TEST_CASE("Selection Parser - Index Selection", "[unit][selection]") {
+TEST_CASE("Selection Parser - Index Selection", "[selection][index]") {
   SECTION("Single index") {
     auto result = SelectionParser::parse("i1");
     REQUIRE(result.has_value());
-    REQUIRE(result.value().size() == 1);
 
-    for (const auto &sel : result.value()) {
-      const auto *selection = std::get_if<AtomIndexSelection>(&sel);
-      REQUIRE(selection != nullptr);
-      REQUIRE(selection->data.size() == 1);
-      CHECK(selection->data[0] == 1);
-    }
+    const auto *selection = std::get_if<AtomIndexSelection>(&*result);
+    REQUIRE(selection != nullptr);
+    REQUIRE(selection->data.size() == 1);
+    CHECK(selection->data[0] == 1);
   }
 
   SECTION("Multiple indices") {
     auto result = SelectionParser::parse("i1,2,3");
     REQUIRE(result.has_value());
-    REQUIRE(result.value().size() == 1);
 
-    for (const auto &sel : result.value()) {
-      const auto *selection = std::get_if<AtomIndexSelection>(&sel);
-      REQUIRE(selection != nullptr);
-      REQUIRE(selection->data.size() == 3);
-      CHECK(selection->data == std::vector{1, 2, 3});
-    }
+    const auto *selection = std::get_if<AtomIndexSelection>(&*result);
+    REQUIRE(selection != nullptr);
+    REQUIRE(selection->data.size() == 3);
+    CHECK(selection->data == std::vector{1, 2, 3});
   }
 
   SECTION("Index range") {
     auto result = SelectionParser::parse("i1-3");
     REQUIRE(result.has_value());
-    REQUIRE(result.value().size() == 1);
 
-    for (const auto &sel : result.value()) {
-      const auto *selection = std::get_if<AtomIndexSelection>(&sel);
-      REQUIRE(selection != nullptr);
-      REQUIRE(selection->data.size() == 3);
-      CHECK(selection->data == std::vector{1, 2, 3});
-    }
+    const auto *selection = std::get_if<AtomIndexSelection>(&*result);
+    REQUIRE(selection != nullptr);
+    REQUIRE(selection->data.size() == 3);
+    CHECK(selection->data == std::vector{1, 2, 3});
   }
 
   SECTION("Mixed indices and ranges") {
     auto result = SelectionParser::parse("i1,2-4,6");
     REQUIRE(result.has_value());
-    REQUIRE(result.value().size() == 1);
 
-    for (const auto &sel : result.value()) {
-      const auto *selection = std::get_if<AtomIndexSelection>(&sel);
-      REQUIRE(selection != nullptr);
-      REQUIRE(selection->data.size() == 5);
-      CHECK(selection->data == std::vector{1, 2, 3, 4, 6});
-    }
+    const auto *selection = std::get_if<AtomIndexSelection>(&*result);
+    REQUIRE(selection != nullptr);
+    REQUIRE(selection->data.size() == 5);
+    CHECK(selection->data == std::vector{1, 2, 3, 4, 6});
   }
 }
 
-TEST_CASE("Selection Parser - Atom Type Selection", "[unit][selection]") {
+TEST_CASE("Selection Parser - Atom Type Selection", "[selection][atom]") {
   SECTION("Single atom type") {
     auto result = SelectionParser::parse("aC");
     REQUIRE(result.has_value());
-    REQUIRE(result.value().size() == 1);
 
-    for (const auto &sel : result.value()) {
-      const auto *selection = std::get_if<AtomTypeSelection>(&sel);
-      REQUIRE(selection != nullptr);
-      REQUIRE(selection->data.size() == 1);
-      CHECK(selection->data[0] == "C");
-    }
+    const auto *selection = std::get_if<AtomTypeSelection>(&*result);
+    REQUIRE(selection != nullptr);
+    REQUIRE(selection->data.size() == 1);
+    CHECK(selection->data[0] == "C");
   }
 
   SECTION("Multiple atom types") {
     auto result = SelectionParser::parse("aC,N,O");
     REQUIRE(result.has_value());
-    REQUIRE(result.value().size() == 1);
 
-    for (const auto &sel : result.value()) {
-      const auto *selection = std::get_if<AtomTypeSelection>(&sel);
-      REQUIRE(selection != nullptr);
-      REQUIRE(selection->data.size() == 3);
-      CHECK(selection->data == std::vector<std::string>{"C", "N", "O"});
-    }
+    const auto *selection = std::get_if<AtomTypeSelection>(&*result);
+    REQUIRE(selection != nullptr);
+    REQUIRE(selection->data.size() == 3);
+    CHECK(selection->data == std::vector<std::string>{"C", "N", "O"});
   }
 
   SECTION("Atom types with underscores") {
     auto result = SelectionParser::parse("aCA_1,CB_2");
     REQUIRE(result.has_value());
-    REQUIRE(result.value().size() == 1);
 
-    for (const auto &sel : result.value()) {
-      const auto *selection = std::get_if<AtomTypeSelection>(&sel);
-      REQUIRE(selection != nullptr);
-      REQUIRE(selection->data.size() == 2);
-      CHECK(selection->data == std::vector<std::string>{"CA_1", "CB_2"});
-    }
+    const auto *selection = std::get_if<AtomTypeSelection>(&*result);
+    REQUIRE(selection != nullptr);
+    REQUIRE(selection->data.size() == 2);
+    CHECK(selection->data == std::vector<std::string>{"CA_1", "CB_2"});
   }
 }
 
-TEST_CASE("Selection Parser - Molecule Index Selection", "[unit][selection]") {
+TEST_CASE("Selection Parser - Molecule Index Selection",
+          "[selection][molecule]") {
   SECTION("Single molecule") {
     auto result = SelectionParser::parse("j1");
     REQUIRE(result.has_value());
-    REQUIRE(result.value().size() == 1);
 
-    for (const auto &sel : result.value()) {
-      const auto *selection = std::get_if<MoleculeIndexSelection>(&sel);
-      REQUIRE(selection != nullptr);
-      REQUIRE(selection->data.size() == 1);
-      CHECK(selection->data[0] == 1);
-    }
+    const auto *selection = std::get_if<MoleculeIndexSelection>(&*result);
+    REQUIRE(selection != nullptr);
+    REQUIRE(selection->data.size() == 1);
+    CHECK(selection->data[0] == 1);
   }
 
   SECTION("Molecule range") {
     auto result = SelectionParser::parse("j1-3");
     REQUIRE(result.has_value());
-    REQUIRE(result.value().size() == 1);
 
-    for (const auto &sel : result.value()) {
-      const auto *selection = std::get_if<MoleculeIndexSelection>(&sel);
-      REQUIRE(selection != nullptr);
-      REQUIRE(selection->data.size() == 3);
-      CHECK(selection->data == std::vector{1, 2, 3});
-    }
+    const auto *selection = std::get_if<MoleculeIndexSelection>(&*result);
+    REQUIRE(selection != nullptr);
+    REQUIRE(selection->data.size() == 3);
+    CHECK(selection->data == std::vector{1, 2, 3});
   }
 }
 
-TEST_CASE("Selection Parser - Invalid Inputs", "[unit][selection]") {
+TEST_CASE("Selection Parser - Invalid Inputs", "[selection][invalid]") {
   SECTION("Invalid selections should return nullopt") {
     auto [input, description] = GENERATE(table<std::string, std::string>(
         {{"x1,2,3", "Invalid prefix"},
@@ -229,31 +132,25 @@ TEST_CASE("Selection Parser - Invalid Inputs", "[unit][selection]") {
   }
 }
 
-TEST_CASE("Selection Parser - Edge Cases", "[unit][selection]") {
+TEST_CASE("Selection Parser - Edge Cases", "[selection][edge]") {
   SECTION("Whitespace handling") {
     auto result = SelectionParser::parse("i1, 2,  3");
     REQUIRE(result.has_value());
-    REQUIRE(result.value().size() == 1);
 
-    for (const auto &sel : result.value()) {
-      const auto *selection = std::get_if<AtomIndexSelection>(&sel);
-      REQUIRE(selection != nullptr);
-      REQUIRE(selection->data.size() == 3);
-      CHECK(selection->data == std::vector{1, 2, 3});
-    }
+    const auto *selection = std::get_if<AtomIndexSelection>(&*result);
+    REQUIRE(selection != nullptr);
+    REQUIRE(selection->data.size() == 3);
+    CHECK(selection->data == std::vector{1, 2, 3});
   }
 
   SECTION("Duplicate values are removed") {
     auto result = SelectionParser::parse("i1,2,2,3,1");
     REQUIRE(result.has_value());
-    REQUIRE(result.value().size() == 1);
 
-    for (const auto &sel : result.value()) {
-      const auto *selection = std::get_if<AtomIndexSelection>(&sel);
-      REQUIRE(selection != nullptr);
-      REQUIRE(selection->data.size() == 3);
-      CHECK(selection->data == std::vector{1, 2, 3});
-    }
+    const auto *selection = std::get_if<AtomIndexSelection>(&*result);
+    REQUIRE(selection != nullptr);
+    REQUIRE(selection->data.size() == 3);
+    CHECK(selection->data == std::vector{1, 2, 3});
   }
 
   SECTION("Complex mixed cases") {
@@ -272,7 +169,6 @@ TEST_CASE("Selection Parser - Edge Cases", "[unit][selection]") {
     INFO("Testing input: " << test_case.input);
     auto result = SelectionParser::parse(test_case.input);
     REQUIRE(result.has_value());
-    REQUIRE(result->size() == 1);
 
     std::visit(
         [&test_case](const auto &selection) {
@@ -285,18 +181,15 @@ TEST_CASE("Selection Parser - Edge Cases", "[unit][selection]") {
             CHECK(selection.data.size() == test_case.expected_size);
           }
         },
-        result->front());
+        *result);
   }
 }
 
-// tests requiring files
-
-TEST_CASE_METHOD(TestFixture, "PDB Read/Write", "[file][io][pdb]") {
-  fs::path temp_pdb = "/tmp/test_write.pdb";
+TEST_CASE("PDB Read/Write", "[io][pdb]") {
+  fs::path temp_pdb = EXAMPLES_DIR / "test_write.pdb";
 
   Trajectory traj_read;
-  fs::path test_file = this->get_test_file("i00000001.pdb");
-  std::vector<fs::path> files = {test_file};
+  std::vector<fs::path> files = {EXAMPLES_DIR / "coord.pdb"};
   traj_read.load_files(files);
   REQUIRE(traj_read.next_frame());
 
@@ -311,11 +204,12 @@ TEST_CASE_METHOD(TestFixture, "PDB Read/Write", "[file][io][pdb]") {
   std::ifstream temp_file(temp_pdb);
   std::string temp_content((std::istreambuf_iterator<char>(temp_file)),
                            std::istreambuf_iterator<char>());
-
+  INFO("Temporary PDB content:\n" << temp_content);
   REQUIRE(!temp_content.empty());
 
   Trajectory traj_read_original;
-  traj_read_original.load_files(files);
+  std::vector<fs::path> original_files = {EXAMPLES_DIR / "coord.pdb"};
+  traj_read_original.load_files(original_files);
   REQUIRE(traj_read_original.next_frame());
 
   const auto &atoms_read = traj_read_original.atoms();
@@ -331,8 +225,8 @@ TEST_CASE_METHOD(TestFixture, "PDB Read/Write", "[file][io][pdb]") {
                  Catch::Matchers::WithinAbs(atoms_write[i].z, 1e-3));
   }
 
-  const auto &uc_read = traj_read_original.unit_cell().value();
-  const auto &uc_write = traj_write.unit_cell().value();
+  const auto &uc_read = traj_read_original.unit_cell();
+  const auto &uc_write = traj_write.unit_cell();
   REQUIRE_THAT(uc_read.a(), Catch::Matchers::WithinAbs(uc_write.a(), 1e-3));
   REQUIRE_THAT(uc_read.b(), Catch::Matchers::WithinAbs(uc_write.b(), 1e-3));
   REQUIRE_THAT(uc_read.c(), Catch::Matchers::WithinAbs(uc_write.c(), 1e-3));
@@ -346,14 +240,14 @@ TEST_CASE_METHOD(TestFixture, "PDB Read/Write", "[file][io][pdb]") {
   fs::remove(temp_pdb);
 }
 
-TEST_CASE_METHOD(TestFixture, "DCD Read/Write", "[file][io][dcd]") {
-  fs::path temp_dcd = "/tmp/test_write.dcd";
+TEST_CASE("DCD Read/Write", "[io][dcd]") {
+  fs::path temp_dcd = EXAMPLES_DIR / "test_write.dcd";
 
   Trajectory traj_read;
-  fs::path pdb_file = this->get_test_file("i00000001.pdb");
-  std::vector<fs::path> files = {pdb_file,
-                                 this->get_test_file("i00000002.dcd")};
+  std::vector<fs::path> files = {EXAMPLES_DIR / "coord.pdb",
+                                 EXAMPLES_DIR / "traj.dcd"};
   traj_read.load_files(files);
+
   traj_read.set_output_file(temp_dcd);
 
   while (traj_read.next_frame()) {
@@ -364,7 +258,7 @@ TEST_CASE_METHOD(TestFixture, "DCD Read/Write", "[file][io][dcd]") {
   }
 
   Trajectory traj_write;
-  std::vector<fs::path> written_files = {pdb_file, temp_dcd};
+  std::vector<fs::path> written_files = {EXAMPLES_DIR / "coord.pdb", temp_dcd};
   traj_write.load_files(written_files);
 
   std::vector<std::vector<trajan::core::Atom>> all_atoms_write;
@@ -373,7 +267,9 @@ TEST_CASE_METHOD(TestFixture, "DCD Read/Write", "[file][io][dcd]") {
   }
 
   Trajectory traj_read_original;
-  traj_read_original.load_files(files);
+  std::vector<fs::path> original_files = {EXAMPLES_DIR / "coord.pdb",
+                                          EXAMPLES_DIR / "traj.dcd"};
+  traj_read_original.load_files(original_files);
 
   std::vector<std::vector<trajan::core::Atom>> all_atoms_read;
   while (traj_read_original.next_frame()) {
@@ -399,12 +295,12 @@ TEST_CASE_METHOD(TestFixture, "DCD Read/Write", "[file][io][dcd]") {
   fs::remove(temp_dcd);
 }
 
-TEST_CASE_METHOD(TestFixture, "PDB Read/Write into memory", "[file][io][pdb]") {
+TEST_CASE("PDB Read/Write into memory", "[io][pdb]") {
 
-  fs::path temp_pdb = "/tmp/test_write.pdb";
+  fs::path temp_pdb = EXAMPLES_DIR / "test_write.pdb";
 
   Trajectory traj_read;
-  std::vector<fs::path> files = {this->get_test_file("i00000001.pdb")};
+  std::vector<fs::path> files = {EXAMPLES_DIR / "coord.pdb"};
   traj_read.load_files_into_memory(files);
   REQUIRE(traj_read.next_frame());
 
@@ -419,10 +315,12 @@ TEST_CASE_METHOD(TestFixture, "PDB Read/Write into memory", "[file][io][pdb]") {
   std::ifstream temp_file(temp_pdb);
   std::string temp_content((std::istreambuf_iterator<char>(temp_file)),
                            std::istreambuf_iterator<char>());
+  INFO("Temporary PDB content:\n" << temp_content);
   REQUIRE(!temp_content.empty());
 
   Trajectory traj_read_original;
-  traj_read_original.load_files_into_memory(files);
+  std::vector<fs::path> original_files = {EXAMPLES_DIR / "coord.pdb"};
+  traj_read_original.load_files_into_memory(original_files);
   REQUIRE(traj_read_original.next_frame());
 
   const auto &atoms_read = traj_read_original.atoms();
@@ -438,8 +336,8 @@ TEST_CASE_METHOD(TestFixture, "PDB Read/Write into memory", "[file][io][pdb]") {
                  Catch::Matchers::WithinAbs(atoms_write[i].z, 1e-3));
   }
 
-  const auto &uc_read = traj_read_original.unit_cell().value();
-  const auto &uc_write = traj_write.unit_cell().value();
+  const auto &uc_read = traj_read_original.unit_cell();
+  const auto &uc_write = traj_write.unit_cell();
   REQUIRE_THAT(uc_read.a(), Catch::Matchers::WithinAbs(uc_write.a(), 1e-3));
   REQUIRE_THAT(uc_read.b(), Catch::Matchers::WithinAbs(uc_write.b(), 1e-3));
   REQUIRE_THAT(uc_read.c(), Catch::Matchers::WithinAbs(uc_write.c(), 1e-3));
@@ -453,13 +351,12 @@ TEST_CASE_METHOD(TestFixture, "PDB Read/Write into memory", "[file][io][pdb]") {
   fs::remove(temp_pdb);
 }
 
-TEST_CASE_METHOD(TestFixture, "DCD Read/Write into memory", "[file][io][dcd]") {
-  fs::path temp_dcd = "/tmp/test_write.dcd";
+TEST_CASE("DCD Read/Write into memory", "[io][dcd]") {
+  fs::path temp_dcd = EXAMPLES_DIR / "test_write.dcd";
 
   Trajectory traj_read;
-  fs::path pdb_file = this->get_test_file("i00000001.pdb");
-  std::vector<fs::path> files = {pdb_file,
-                                 this->get_test_file("i00000002.dcd")};
+  std::vector<fs::path> files = {EXAMPLES_DIR / "coord.pdb",
+                                 EXAMPLES_DIR / "traj.dcd"};
   traj_read.load_files_into_memory(files);
 
   traj_read.set_output_file(temp_dcd);
@@ -474,7 +371,7 @@ TEST_CASE_METHOD(TestFixture, "DCD Read/Write into memory", "[file][io][dcd]") {
   }
 
   Trajectory traj_write;
-  std::vector<fs::path> written_files = {pdb_file, temp_dcd};
+  std::vector<fs::path> written_files = {EXAMPLES_DIR / "coord.pdb", temp_dcd};
   traj_write.load_files_into_memory(written_files);
 
   std::vector<std::vector<trajan::core::Atom>> all_atoms_write;

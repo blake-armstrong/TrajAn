@@ -1,4 +1,5 @@
 #pragma once
+
 #include <algorithm>
 #include <optional>
 #include <stdexcept>
@@ -244,36 +245,10 @@ process_selection(const std::vector<SelectionCriteria> &selections,
   return entities;
 }
 
-inline auto selection_validator(
-    std::vector<SelectionCriteria> &parsed_sel,
-    std::optional<std::vector<char>> restrictions = std::nullopt) {
+void print_parsed_selection(const std::vector<SelectionCriteria> &result);
 
-  return [parsed_sel = &parsed_sel, restrictions](const std::string &input) {
-    auto result = SelectionParser::parse(input);
-    if (!result) {
-      return std::string("Invalid selection format");
-    }
-    if (restrictions.has_value()) {
-      for (const auto &sel : result.value()) {
-        std::string error;
-        std::visit(
-            [restrictions = &restrictions.value(), &error](const auto &s) {
-              using SelType = std::decay_t<decltype(s)>;
-              const char p = SelectionTraits<SelType>::prefix;
-              if (std::find(restrictions->begin(), restrictions->end(), p) ==
-                  restrictions->end()) {
-                error = fmt::format("Selection prefix '{}' is not allowed.", p);
-              }
-            },
-            sel);
-        if (!error.empty()) {
-          return error;
-        }
-      }
-    }
-    *parsed_sel = result.value();
-    return std::string();
-  };
-};
+std::vector<SelectionCriteria> selection_validator(
+    const std::string &input,
+    std::optional<std::vector<char>> restrictions = std::nullopt);
 
 } // namespace trajan::io

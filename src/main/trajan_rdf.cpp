@@ -39,14 +39,17 @@ void run_rdf_subcommand(const RDFOpts &opts, Trajectory &traj) {
     rdf.r[i] = ri;
   }
 
+  auto parsed_sel1 = io::selection_validator(opts.raw_sel1);
+  auto parsed_sel2 = io::selection_validator(opts.raw_sel2);
+
   core::NeighbourList nl(opts.rcut);
+
+  using EntityVariants = std::vector<core::EntityVariant>;
 
   size_t frame_count = 0;
   while (traj.next_frame()) {
-    std::vector<core::EntityVariant> selection1 =
-        traj.get_entities(opts.parsed_sel1);
-    std::vector<core::EntityVariant> selection2 =
-        traj.get_entities(opts.parsed_sel2);
+    EntityVariants selection1 = traj.get_entities(parsed_sel1);
+    EntityVariants selection2 = traj.get_entities(parsed_sel2);
     // TODO: molecule origin input
 
     auto uc = traj.unit_cell();
@@ -107,15 +110,18 @@ CLI::App *add_rdf_subcommand(CLI::App &app, Trajectory &traj) {
                   "  aC,N,O      (atom types C, N, O)\n"
                   "  j1,3-5      (molecule indices 1,3,4,5)\n"
                   "  mM1,M2      (molecule types M1,M2)")
-      ->required()
-      ->check(io::selection_validator(opts->parsed_sel1));
+      ->required();
+  // ->check(io::selection_validator(opts->parsed_sel1));
 
   rdf->add_option("--s2,--sel2", opts->raw_sel2,
                   fmt::format("Second selection (same format as {})", sel1))
-      ->required()
-      ->check(io::selection_validator(opts->parsed_sel2));
+      ->required();
+  // ->check(io::selection_validator(opts->parsed_sel2));
 
-  rdf->callback([opts, &traj]() { run_rdf_subcommand(*opts, traj); });
+  rdf->callback([opts, &traj]() {
+    trajan::log::set_subcommand_log_pattern("rdf");
+    run_rdf_subcommand(*opts, traj);
+  });
   return rdf;
 }
 

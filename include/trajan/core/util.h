@@ -247,4 +247,35 @@ inline bool unitcell_is_reasonable(const occ::Mat3 &box, double ltol = 1e-6,
   return true;
 }
 
+template <typename T>
+std::string format_vector(const std::vector<T> &vec, size_t max_width = 80) {
+  if (vec.empty()) {
+    return "None";
+  }
+
+  std::ostringstream oss;
+  size_t current_line_length = 0;
+
+  for (size_t i = 0; i < vec.size(); ++i) {
+    std::ostringstream element_oss;
+    element_oss << vec[i];
+    std::string element_str = element_oss.str();
+
+    std::string separator = (i == 0) ? "" : ", ";
+    size_t total_length = separator.length() + element_str.length();
+
+    if (current_line_length > 0 &&
+        current_line_length + total_length > max_width) {
+      oss << "\n";
+      current_line_length = 0;
+      separator = "";
+    }
+
+    oss << separator << element_str;
+    current_line_length += total_length;
+  }
+
+  return oss.str();
+}
+
 } // namespace trajan::util

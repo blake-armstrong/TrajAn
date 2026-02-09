@@ -124,4 +124,72 @@ SelectionParser::parse(const std::string &input) {
 
   return results.empty() ? std::nullopt : std::make_optional(results);
 }
+
+void print_parsed_selection(const std::vector<SelectionCriteria> &result) {
+  std::vector<int> atom_indices;
+  std::vector<std::string> atom_types;
+  std::vector<int> molecule_indices;
+  std::vector<std::string> molecule_types;
+
+  for (const auto &sel : result) {
+    std::visit(
+        [&](const auto &s) {
+          using SelType = std::decay_t<decltype(s)>;
+
+          if constexpr (std::is_same_v<SelType, AtomIndexSelection>) {
+            atom_indices.insert(atom_indices.end(), s.data.begin(),
+                                s.data.end());
+          } else if constexpr (std::is_same_v<SelType, AtomTypeSelection>) {
+            atom_types.insert(atom_types.end(), s.data.begin(), s.data.end());
+          } else if constexpr (std::is_same_v<SelType,
+                                              MoleculeIndexSelection>) {
+            molecule_indices.insert(molecule_indices.end(), s.data.begin(),
+                                    s.data.end());
+          } else if constexpr (std::is_same_v<SelType, MoleculeTypeSelection>) {
+            molecule_types.insert(molecule_types.end(), s.data.begin(),
+                                  s.data.end());
+          }
+        },
+        sel);
+  }
+
+  trajan::log::debug("Selection Summary:");
+  trajan::log::debug("  atom indices: {}",
+                     trajan::util::format_vector(atom_indices, 60));
+  trajan::log::debug("  atom types: {}",
+                     trajan::util::format_vector(atom_types, 60));
+  trajan::log::debug("  molecule indices: {}",
+                     trajan::util::format_vector(molecule_indices, 60));
+  trajan::log::debug("  molecule types: {}",
+                     trajan::util::format_vector(molecule_types, 60));
+};
+
+std::vector<SelectionCriteria>
+selection_validator(const std::string &input,
+                    std::optional<std::vector<char>> restrictions) {
+
+  trajan::log::debug("Raw selection string: '{}'", input);
+  auto result = SelectionParser::parse(input);
+  if (!result) {
+    throw std::invalid_argument("Invalid selection format");
+  }
+  if (restrictions.has_value()) {
+    for (const auto &sel : result.value()) {
+      std::visit(
+          [restrictions = &restrictions.value()](const auto &s) {
+            using SelType = std::decay_t<decltype(s)>;
+            const char p = SelectionTraits<SelType>::prefix;
+            if (std::find(restrictions->begin(), restrictions->end(), p) ==
+                restrictions->end()) {
+              throw std::invalid_argument(
+                  fmt::format("Selection prefix '{}' is not allowed.", p));
+            }
+          },
+          sel);
+    };
+  }
+  print_parsed_selection(result.value());
+  return result.value();
+};
+
 } // namespace trajan::io

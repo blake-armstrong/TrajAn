@@ -17,9 +17,10 @@ void print_header() {
   const std::string spdlog_version_string = fmt::format(
       "{}.{}.{}", SPDLOG_VER_MAJOR, SPDLOG_VER_MINOR, SPDLOG_VER_PATCH);
 
-  log::info(R"(
+  trajan::log::info("{}", std::string(trajan::log::LINE_WIDTH, '-'));
+  trajan::log::info(R"(
   
-Trajectory Analysis (C++)
+TRAJAN
 
 a program for molecular dynamics analysis.
 
@@ -27,12 +28,14 @@ copyright (C) 2024 -> Blake Armstrong
 
 this version of trajan makes use of the following third party libraries:
 
-CLI11                command line argument parser
-eigen3               Linear Algebra (v {})
-fmt                  String formatting (v {})
-spdlog               Logging (v {})
+  CLI11                command line argument parser
+  eigen3               Linear Algebra (v {})
+  fmt                  String formatting (v {})
+  spdlog               Logging (v {})
 
 )",
-            eigen_version_string, fmt_version_string, spdlog_version_string);
+                    eigen_version_string, fmt_version_string,
+                    spdlog_version_string);
+  trajan::log::info("{}", std::string(trajan::log::LINE_WIDTH, '-'));
 }
 } // namespace trajan::main

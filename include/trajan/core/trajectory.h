@@ -24,11 +24,12 @@ struct BondCutoff {
 };
 
 struct TopologyUpdateSettings {
+  bool compute_topology{false};
   bool top_auto{true};
   int update_frequency{0};
   std::vector<BondCutoff> bond_cutoffs{};
   std::vector<int> no_bonds{};
-  double bond_tolerance;
+  double bond_tolerance{0.4};
 };
 
 class Trajectory {
@@ -86,9 +87,7 @@ public:
   void update_topology(
       const std::optional<TopologyUpdateSettings> &settings = std::nullopt);
 
-  inline void set_topology_update_frequency(int freq) {
-    m_topology_update_frequency = 0;
-  }
+  void set_topology_settings(const TopologyUpdateSettings &settings);
 
 private:
   bool _next_frame();
@@ -103,7 +102,8 @@ private:
   Frame m_frame;
   std::vector<Frame> m_frames;
   bool m_frames_in_memory{false};
-  int m_topology_update_frequency{0};
+  bool next_topology_update();
+  TopologyUpdateSettings m_topology_settings;
 
   mutable Topology m_topology;
   mutable std::vector<Molecule> m_molecules{};

@@ -18,14 +18,19 @@ struct BondCriteria {
 struct TopologyOpts {
   bool top_auto{true};
   int update_frequency{0};
-  std::string nb_raw_sel;
-  std::vector<io::SelectionCriteria> nb_parsed_sel;
-  std::vector<BondCriteria> bond_criterias;
+  std::vector<std::string> nb_raw_sel;
+  std::vector<std::string> bc_raw_sel;
+  // std::vector<io::SelectionCriteria> nb_parsed_sel;
+  // std::vector<BondCriteria> bond_criterias;
   double bond_tolerance;
 };
 
-auto bond_criteria_validator(std::vector<BondCriteria> &bond_criteria,
-                             std::optional<std::vector<char>> restrictions);
+const auto MOLECULE_RESTRICTIONS =
+    std::make_optional<std::vector<char>>({'j', 'm'});
+
+BondCriteria bond_criteria_validator(
+    const std::string &input,
+    std::optional<std::vector<char>> restrictions = std::nullopt);
 
 void run_topology_subcommand(const TopologyOpts &opts, Trajectory &traj);
 CLI::App *add_topology_subcommand(CLI::App &app, Trajectory &traj);

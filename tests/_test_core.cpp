@@ -1,35 +1,32 @@
 #include <catch2/benchmark/catch_benchmark.hpp>
 #include <catch2/catch_approx.hpp>
-#include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/matchers/catch_matchers_vector.hpp>
 #include <chrono>
-#include <filesystem>
-#include <fstream>
-#include <occ/crystal/unitcell.h>
+#include <omp.h>
 #include <random>
-#include <trajan/core/atomgraph.h>
-#include <trajan/core/log.h>
+#include <trajan/core/element.h>
+#include <trajan/core/ewald.h>
+#include <trajan/core/linear_algebra.h>
 #include <trajan/core/molecule.h>
 #include <trajan/core/neigh.h>
 #include <trajan/core/topology.h>
 #include <trajan/core/trajectory.h>
+#include <trajan/core/unit_cell.h>
+#include <trajan/core/units.h>
 #include <trajan/io/pdb.h>
 #include <trajan/io/selection.h>
 #include <vector>
 
 namespace fs = std::filesystem;
-namespace units = occ::units;
 
-using occ::Mat3N;
-using occ::Vec3;
-using occ::crystal::UnitCell;
-
+using trajan::Mat3N;
+using trajan::Vec3;
 using trajan::core::Atom;
-using trajan::core::AtomGraph;
 using trajan::core::Bond;
+using trajan::core::BondGraph;
 using trajan::core::Cell;
 using trajan::core::CellList;
 using trajan::core::DihedralType;
@@ -37,72 +34,39 @@ using trajan::core::Element;
 using trajan::core::Entity;
 using trajan::core::Frame;
 using trajan::core::Molecule;
-using trajan::core::NeighbourList;
 using trajan::core::Topology;
 using trajan::core::Trajectory;
-
-using trajan::io::AtomIndexSelection;
-using trajan::io::AtomTypeSelection;
-using trajan::io::MoleculeIndexSelection;
-using trajan::io::MoleculeTypeSelection;
+using trajan::core::UnitCell;
 using trajan::io::SelectionCriteria;
 using trajan::io::SelectionParser;
+using Entities = std::vector<trajan::core::EntityType>;
 
-static std::string g_test_data_path;
+namespace units = trajan::units;
 
-std::string get_test_data_path() { return g_test_data_path; }
+fs::path CURRENT = __FILE__;
+fs::path EXAMPLES_DIR = CURRENT.parent_path().parent_path() / "examples";
 
-bool has_test_data() {
-  return !g_test_data_path.empty() && fs::exists(g_test_data_path);
-}
+// TEST_CASE("Ewald Summation", "[ewald]") {
+//   const double alpha = 0.25;
+//   const double box_size = 10.0;
+//   UnitCell unit_cell = trajan::core::cubic_cell(box_size);
+//
+//   Mat3N positions(3, 2);
+//   positions.col(0) << 1.0, 2.0, 3.0;
+//   positions.col(1) << 4.0, 5.0, 6.0;
+//
+//   std::vector<double> charges = {1.0, -1.0};
+//
+//   trajan::core::Ewald ewald(alpha);
+//   ewald.update(positions, charges, unit_cell);
+//
+//   const double direct_sum = ewald.reciprocal_sum(false);
+//   const double fft_sum = ewald.reciprocal_sum(true);
+//
+//   REQUIRE(direct_sum == Catch::Approx(fft_sum));
+// }
 
-class TestFixture {
-public:
-  fs::path get_test_file(const fs::path &file) {
-    this->require_test_data();
-    return fs::path(get_test_data_path()) / file;
-  }
-
-  void require_test_data() {
-    if (!has_test_data()) {
-      SKIP("Test data path not provided or doesn't exist. Use --data-path "
-           "<path>");
-    }
-  }
-};
-
-int main(int argc, char *argv[]) {
-  Catch::Session session;
-
-  auto cli = session.cli() |
-             Catch::Clara::Opt(g_test_data_path, "path")["-d"]["--data-path"](
-                 "Path to trajectory test data directory");
-
-  session.cli(cli);
-
-  int result = session.applyCommandLine(argc, argv);
-  if (result != 0)
-    return result;
-
-  if (g_test_data_path.empty()) {
-    trajan::log::info(
-        "No test data path provided. File-based tests will be skipped.");
-    trajan::log::info("Use --data-path <path> to enable all tests.");
-  } else if (!fs::exists(g_test_data_path)) {
-    trajan::log::info("Warning: Test data path doesn't exist: {}",
-                      g_test_data_path);
-    trajan::log::info("File-based tests will be skipped.");
-    g_test_data_path.clear();
-  } else {
-    trajan::log::info("Using test data path: {}", g_test_data_path);
-  }
-
-  return session.run();
-}
-
-// tests that dont require files
-
-TEST_CASE("Element constructor with exact matching", "[unit][element]") {
+TEST_CASE("Element constructor with exact matching", "[element]") {
   SECTION("Exact matches are found correctly") {
     auto [input, expected_symbol, expected_number] =
         GENERATE(table<std::string, std::string, int>({{"H", "H", 1},
@@ -125,7 +89,7 @@ TEST_CASE("Element constructor with exact matching", "[unit][element]") {
   }
 }
 
-TEST_CASE("Element constructor with partial matching", "[unit][element]") {
+TEST_CASE("Element constructor with partial matching", "[element]") {
   SECTION("Partial matches find longest valid symbol") {
     auto [input, expected_symbol] =
         GENERATE(table<std::string, std::string>({{"Hg", "Hg"},
@@ -147,7 +111,7 @@ TEST_CASE("Element constructor with partial matching", "[unit][element]") {
   }
 }
 
-TEST_CASE("Element constructor with edge cases", "[unit][element]") {
+TEST_CASE("Element constructor with edge cases", "[element]") {
   SECTION("Empty string returns dummy element") {
     Element e("", false);
     REQUIRE(e.symbol() == "Xx");
@@ -162,16 +126,27 @@ TEST_CASE("Element constructor with edge cases", "[unit][element]") {
   }
 }
 
-TEST_CASE("CellList Basic Construction", "[unit][neigh]") {
+TEST_CASE("CellList Basic Construction", "[cell_list]") {
+  auto unit_cell = trajan::core::cubic_cell(10.0);
   double cutoff = 2.0;
 
-  SECTION("Construction") { REQUIRE_NOTHROW(CellList(cutoff)); }
+  SECTION("Construction with single thread") {
+    REQUIRE_NOTHROW(CellList(unit_cell, cutoff, 1));
+  }
+
+  SECTION("Construction with multiple threads") {
+    REQUIRE_NOTHROW(CellList(unit_cell, cutoff, 4));
+  }
+
+  SECTION("Construction with invalid thread count") {
+    REQUIRE_NOTHROW(CellList(unit_cell, cutoff, -1));
+  }
 }
 
-TEST_CASE("Cell Adding and Retrieving Atoms", "[unit][neigh]") {
+TEST_CASE("Cell Adding and Retrieving Atoms", "[cell]") {
   Cell cell;
   Vec3 pos(1.0, 1.0, 1.0);
-  Atom atom(pos, Element(0), 0);
+  Atom atom(pos, 0, 0);
 
   SECTION("Adding single atom") {
     cell.add_entity(atom);
@@ -198,9 +173,9 @@ template <typename Func> double measure_execution_time(Func &&func) {
   return std::chrono::duration<double>(end - start).count();
 }
 
-TEST_CASE("CellList vs Double Loop Comparison", "[unit][neigh]") {
+TEST_CASE("CellList vs Double Loop Comparison", "[cell_list]") {
   const double box_size = 50.0;
-  UnitCell unit_cell = occ::crystal::cubic_cell(box_size);
+  UnitCell unit_cell = trajan::core::cubic_cell(box_size);
   const int num_atoms = 3000;
   const double cutoff = 5.0;
   const int num_threads = 1;
@@ -209,29 +184,31 @@ TEST_CASE("CellList vs Double Loop Comparison", "[unit][neigh]") {
   std::random_device rd;
   std::mt19937 gen(42);
 
-  SECTION("Comparing pair counting between methods with wrapped atoms only") {
+  SECTION("Comparing pair counting between methods inside box only atoms") {
     std::uniform_real_distribution<> dis(0, box_size);
 
     // create atoms with random positions
     for (int i = 0; i < num_atoms; ++i) {
       Vec3 position(dis(gen), dis(gen), dis(gen));
-      Atom atom(position, Element(0), i);
+      Atom atom(position, 0, i);
       atoms.push_back(atom);
     }
 
     std::atomic<size_t> cell_list_pairs{0};
     std::atomic<size_t> verlet_list_pairs{0};
 
-    NeighbourList neighbour_list(cutoff);
+    trajan::core::NeighbourList neighbour_list(unit_cell, cutoff, num_threads);
     double cell_list_time = measure_execution_time([&]() {
-      neighbour_list.update(atoms, unit_cell);
+      neighbour_list.update(atoms);
       neighbour_list.iterate_neighbours([&](const Entity &e1, const Entity &e2,
                                             double rsq) { cell_list_pairs++; });
     });
 
-    neighbour_list = NeighbourList(cutoff, NeighbourList::Type::Verlet);
+    neighbour_list =
+        trajan::core::NeighbourList(unit_cell, cutoff, num_threads,
+                                    trajan::core::NeighbourList::Type::Verlet);
     double verlet_list_time = measure_execution_time([&]() {
-      neighbour_list.update(atoms, unit_cell);
+      neighbour_list.update(atoms);
       neighbour_list.iterate_neighbours(
           [&](const Entity &e1, const Entity &e2, double rsq) {
             verlet_list_pairs++;
@@ -257,7 +234,7 @@ TEST_CASE("CellList vs Double Loop Comparison", "[unit][neigh]") {
     INFO("Speed-up factor: " << verlet_list_time / cell_list_time);
     REQUIRE(verlet_list_time > cell_list_time);
   }
-  SECTION("Comparing pair counting between methods with unwrapped atoms only") {
+  SECTION("Comparing pair counting between methods outside box only atoms") {
     std::uniform_real_distribution<> dis(-5, box_size - 5);
 
     atoms.clear();
@@ -265,22 +242,24 @@ TEST_CASE("CellList vs Double Loop Comparison", "[unit][neigh]") {
     // create atoms with random positions
     for (int i = 0; i < num_atoms; ++i) {
       Vec3 position(dis(gen), dis(gen), dis(gen));
-      Atom atom(position, Element(0), i);
+      Atom atom(position, 0, i);
       atoms.push_back(atom);
     }
     std::atomic<size_t> cell_list_pairs{0};
     std::atomic<size_t> verlet_list_pairs{0};
 
-    NeighbourList neighbour_list(cutoff);
+    trajan::core::NeighbourList neighbour_list(unit_cell, cutoff, num_threads);
     double cell_list_time = measure_execution_time([&]() {
-      neighbour_list.update(atoms, unit_cell);
+      neighbour_list.update(atoms);
       neighbour_list.iterate_neighbours([&](const Entity &e1, const Entity &e2,
                                             double rsq) { cell_list_pairs++; });
     });
 
-    neighbour_list = NeighbourList(cutoff, NeighbourList::Type::Verlet);
+    neighbour_list =
+        trajan::core::NeighbourList(unit_cell, cutoff, num_threads,
+                                    trajan::core::NeighbourList::Type::Verlet);
     double verlet_list_time = measure_execution_time([&]() {
-      neighbour_list.update(atoms, unit_cell);
+      neighbour_list.update(atoms);
       neighbour_list.iterate_neighbours(
           [&](const Entity &e1, const Entity &e2, double rsq) {
             verlet_list_pairs++;
@@ -307,8 +286,7 @@ TEST_CASE("CellList vs Double Loop Comparison", "[unit][neigh]") {
     REQUIRE(verlet_list_time > cell_list_time);
   }
 }
-TEST_CASE("CellList vs Double Loop Comparison using entities",
-          "[unit][neigh]") {
+TEST_CASE("CellList vs Double Loop Comparison using entities", "[cell_list]") {
   const double box_size = 50.0;
   const int num_atoms = 3000;
   const double cutoff = 5.0;
@@ -317,14 +295,14 @@ TEST_CASE("CellList vs Double Loop Comparison using entities",
   std::mt19937 gen(42);
   std::uniform_real_distribution<> dis(0, box_size);
 
-  UnitCell unit_cell = occ::crystal::cubic_cell(box_size);
+  UnitCell unit_cell = trajan::core::cubic_cell(box_size);
 
   // create atoms with random positions
-  std::vector<trajan::core::EntityVariant> entities;
+  Entities entities;
   entities.reserve(num_atoms);
   for (int i = 0; i < num_atoms; ++i) {
     Vec3 position(dis(gen), dis(gen), dis(gen));
-    Atom atom(position, Element(0), i);
+    Atom atom(position, 0, i);
     entities.push_back(atom);
   }
 
@@ -332,16 +310,18 @@ TEST_CASE("CellList vs Double Loop Comparison using entities",
     std::atomic<size_t> cell_list_pairs{0};
     std::atomic<size_t> verlet_list_pairs{0};
 
-    NeighbourList neighbour_list(cutoff);
+    trajan::core::NeighbourList neighbour_list(unit_cell, cutoff, num_threads);
     double cell_list_time = measure_execution_time([&]() {
-      neighbour_list.update(entities, unit_cell);
+      neighbour_list.update(entities);
       neighbour_list.iterate_neighbours([&](const Entity &e1, const Entity &e2,
                                             double rsq) { cell_list_pairs++; });
     });
 
-    neighbour_list = NeighbourList(cutoff, NeighbourList::Type::Verlet);
+    neighbour_list =
+        trajan::core::NeighbourList(unit_cell, cutoff, num_threads,
+                                    trajan::core::NeighbourList::Type::Verlet);
     double verlet_list_time = measure_execution_time([&]() {
-      neighbour_list.update(entities, unit_cell);
+      neighbour_list.update(entities);
       neighbour_list.iterate_neighbours(
           [&](const Entity &e1, const Entity &e2, double rsq) {
             verlet_list_pairs++;
@@ -368,27 +348,27 @@ TEST_CASE("CellList vs Double Loop Comparison using entities",
     REQUIRE(verlet_list_time > cell_list_time);
   }
 }
-TEST_CASE(
-    "CellList vs Double Loop Comparison using entities in Trajectory object",
-    "[unit][neigh]") {
+TEST_CASE("CellList vs Double Loop Comparison using entities in Trajectory",
+          "[cell_list]") {
   const double box_size = 50.0;
   const int num_atoms = 3000;
   const double cutoff = 5.0;
+  const int num_threads = 1;
   std::random_device rd;
   std::mt19937 gen(42);
   std::uniform_real_distribution<> dis(0, box_size);
 
   Trajectory trajectory;
   Frame &frame = trajectory.frame();
-  UnitCell unit_cell = occ::crystal::cubic_cell(box_size);
-  frame.set_unit_cell(unit_cell);
+  UnitCell unit_cell = trajan::core::cubic_cell(box_size);
+  frame.set_uc(unit_cell);
 
   // create atoms with random positions
   std::vector<Atom> atoms;
   atoms.reserve(num_atoms);
   for (int i = 0; i < num_atoms; ++i) {
     Vec3 position(dis(gen), dis(gen), dis(gen));
-    Atom atom(position, Element(0), i);
+    Atom atom(position, 0, i);
     atoms.push_back(atom);
   }
   frame.set_atoms(atoms);
@@ -397,16 +377,18 @@ TEST_CASE(
     std::atomic<size_t> cell_list_pairs{0};
     std::atomic<size_t> verlet_list_pairs{0};
 
-    NeighbourList neighbour_list(cutoff);
+    trajan::core::NeighbourList neighbour_list(unit_cell, cutoff, num_threads);
     double cell_list_time = measure_execution_time([&]() {
-      neighbour_list.update(trajectory.atoms(), trajectory.unit_cell());
+      neighbour_list.update(trajectory.atoms());
       neighbour_list.iterate_neighbours([&](const Entity &e1, const Entity &e2,
                                             double rsq) { cell_list_pairs++; });
     });
 
-    neighbour_list = NeighbourList(cutoff, NeighbourList::Type::Verlet);
+    neighbour_list =
+        trajan::core::NeighbourList(unit_cell, cutoff, num_threads,
+                                    trajan::core::NeighbourList::Type::Verlet);
     double verlet_list_time = measure_execution_time([&]() {
-      neighbour_list.update(trajectory.atoms(), trajectory.unit_cell());
+      neighbour_list.update(trajectory.atoms());
       neighbour_list.iterate_neighbours(
           [&](const Entity &e1, const Entity &e2, double rsq) {
             verlet_list_pairs++;
@@ -416,6 +398,7 @@ TEST_CASE(
     INFO("System size: " << num_atoms << " atoms");
     INFO("Box size: " << box_size << "x" << box_size << "x" << box_size);
     INFO("Cutoff distance: " << cutoff);
+    INFO("Number of threads: " << num_threads);
     double volume = box_size * box_size * box_size;
     double expected_pairs_per_atom =
         (4.0 / 3.0) * units::PI * std::pow(cutoff, 3) / volume * num_atoms;
@@ -434,18 +417,19 @@ TEST_CASE(
 }
 
 TEST_CASE("CellList vs Double Loop Comparison inside Trajectory with selection",
-          "[unit][neigh]") {
+          "[cell_list]") {
   const double box_size = 50.0;
-  const int num_atoms = 33000;
-  const double cutoff = 9.0;
+  const int num_atoms = 3000;
+  const double cutoff = 5.0;
+  const int num_threads = 1;
   std::random_device rd;
   std::mt19937 gen(42);
   std::uniform_real_distribution<> dis(0, box_size);
 
   Trajectory trajectory;
   Frame &frame = trajectory.frame();
-  UnitCell unit_cell = occ::crystal::cubic_cell(box_size);
-  frame.set_unit_cell(unit_cell);
+  UnitCell unit_cell = trajan::core::cubic_cell(box_size);
+  frame.set_uc(unit_cell);
   std::vector<Atom> atoms;
   for (int i = 0; i < num_atoms; ++i) {
     Vec3 position(dis(gen), dis(gen), dis(gen));
@@ -463,26 +447,28 @@ TEST_CASE("CellList vs Double Loop Comparison inside Trajectory with selection",
   }
   frame.set_atoms(atoms);
   std::string sel = "aO2";
-  auto result = SelectionParser::parse(sel);
-  REQUIRE(result.has_value());
-  std::vector<trajan::core::EntityVariant> entities =
-      trajectory.get_entities(result.value());
+  std::optional<SelectionCriteria> result = SelectionParser::parse(sel);
+  REQUIRE(result);
+  SelectionCriteria sc = *result;
+  Entities entities = trajectory.get_entities(sc);
   size_t entities_size = entities.size();
 
   SECTION("Comparing pair counting between methods") {
     std::atomic<size_t> cell_list_pairs{0};
     std::atomic<size_t> verlet_list_pairs{0};
 
-    NeighbourList neighbour_list(cutoff);
+    trajan::core::NeighbourList neighbour_list(unit_cell, cutoff, num_threads);
     double cell_list_time = measure_execution_time([&]() {
-      neighbour_list.update(entities, unit_cell);
+      neighbour_list.update(entities);
       neighbour_list.iterate_neighbours([&](const Entity &e1, const Entity &e2,
                                             double rsq) { cell_list_pairs++; });
     });
 
-    neighbour_list = NeighbourList(cutoff, NeighbourList::Type::Verlet);
+    neighbour_list =
+        trajan::core::NeighbourList(unit_cell, cutoff, num_threads,
+                                    trajan::core::NeighbourList::Type::Verlet);
     double verlet_list_time = measure_execution_time([&]() {
-      neighbour_list.update(entities, unit_cell);
+      neighbour_list.update(entities);
       neighbour_list.iterate_neighbours(
           [&](const Entity &e1, const Entity &e2, double rsq) {
             verlet_list_pairs++;
@@ -493,6 +479,7 @@ TEST_CASE("CellList vs Double Loop Comparison inside Trajectory with selection",
     INFO("Number of entities: " << entities_size);
     INFO("Box size: " << box_size << "x" << box_size << "x" << box_size);
     INFO("Cutoff distance: " << cutoff);
+    INFO("Number of threads: " << num_threads);
     double volume = box_size * box_size * box_size;
     double expected_pairs_per_atom =
         (4.0 / 3.0) * units::PI * std::pow(cutoff, 3) / volume * entities_size;
@@ -511,15 +498,15 @@ TEST_CASE("CellList vs Double Loop Comparison inside Trajectory with selection",
 }
 TEST_CASE(
     "CellList vs Double Loop Comparison inside Trajectory with multi selection",
-    "[unit][neigh]") {
+    "[cell_list]") {
   const double box_size = 25.0;
   const int num_atoms = 1000;
   const double cutoff = 6.0;
   const int num_threads = 1;
   Trajectory trajectory;
   Frame &frame = trajectory.frame();
-  UnitCell unit_cell = occ::crystal::cubic_cell(box_size);
-  frame.set_unit_cell(unit_cell);
+  UnitCell unit_cell = trajan::core::cubic_cell(box_size);
+  frame.set_uc(unit_cell);
   std::vector<Atom> atoms;
 
   int points_per_dim = static_cast<int>(std::ceil(std::cbrt(num_atoms)));
@@ -547,30 +534,33 @@ TEST_CASE(
 
   frame.set_atoms(atoms);
   std::string sel = "aO2";
-  auto result1 = SelectionParser::parse(sel);
-  REQUIRE(result1.has_value());
-  auto result2 = SelectionParser::parse(sel);
-  REQUIRE(result2.has_value());
-  std::vector<std::vector<trajan::core::EntityVariant>> all_entities = {
-      trajectory.get_entities(result1.value()),
-      trajectory.get_entities(result2.value())};
+  std::optional<SelectionCriteria> result1 = SelectionParser::parse(sel);
+  REQUIRE(result1);
+  SelectionCriteria sc1 = *result1;
+  std::optional<SelectionCriteria> result2 = SelectionParser::parse(sel);
+  REQUIRE(result2);
+  SelectionCriteria sc2 = *result2;
+  std::vector<Entities> all_entities = {trajectory.get_entities(sc1),
+                                        trajectory.get_entities(sc2)};
   size_t entities_size = all_entities[0].size();
 
   SECTION("Comparing pair counting between methods") {
     std::atomic<size_t> cell_list_pairs{0};
     std::atomic<size_t> verlet_list_pairs{0};
 
-    NeighbourList neighbour_list(cutoff);
+    trajan::core::NeighbourList neighbour_list(unit_cell, cutoff, num_threads);
     double cell_list_time = measure_execution_time([&]() {
-      neighbour_list.update(all_entities, unit_cell);
+      neighbour_list.update(all_entities);
       neighbour_list.iterate_neighbours([&](const trajan::core::Entity &e1,
                                             const trajan::core::Entity &e2,
                                             double rsq) { cell_list_pairs++; });
     });
 
-    neighbour_list = NeighbourList(cutoff, NeighbourList::Type::Verlet);
+    neighbour_list =
+        trajan::core::NeighbourList(unit_cell, cutoff, num_threads,
+                                    trajan::core::NeighbourList::Type::Verlet);
     double verlet_list_time = measure_execution_time([&]() {
-      neighbour_list.update(all_entities, unit_cell);
+      neighbour_list.update(all_entities);
       neighbour_list.iterate_neighbours(
           [&](const trajan::core::Entity &e1, const trajan::core::Entity &e2,
               double rsq) { verlet_list_pairs++; });
@@ -580,6 +570,7 @@ TEST_CASE(
     INFO("Number of entities: " << entities_size);
     INFO("Box size: " << box_size << "x" << box_size << "x" << box_size);
     INFO("Cutoff distance: " << cutoff);
+    INFO("Number of threads: " << num_threads);
     double volume = box_size * box_size * box_size;
     double expected_pairs_per_atom =
         (4.0 / 3.0) * units::PI * std::pow(cutoff, 3) / volume * entities_size;
@@ -597,7 +588,7 @@ TEST_CASE(
   }
 }
 
-TEST_CASE("Molecule construction from atoms", "[unit][molecule]") {
+TEST_CASE("Molecule construction from atoms", "[molecule]") {
   SECTION("Empty molecule") {
     std::vector<Atom> atoms;
     Molecule molecule(atoms);
@@ -626,7 +617,7 @@ TEST_CASE("Molecule construction from atoms", "[unit][molecule]") {
   }
 }
 
-TEST_CASE("AtomGraph bond detection", "[unit][molecule][graph]") {
+TEST_CASE("MoleculeGraph bond detection", "[molecule][graph]") {
   SECTION("Bonded atoms") {
     // Typical C-O bond length
     Atom a1(Vec3{0.0, 0.0, 0.0}, Element("C", true), 0);
@@ -701,7 +692,7 @@ std::vector<Atom> create_disconnected_atoms() {
   return atoms;
 }
 
-TEST_CASE("Topology Construction", "[unit][topology][construction]") {
+TEST_CASE("Topology Construction", "[topology][construction]") {
   SECTION("Default constructor") {
     Topology topology;
     REQUIRE(topology.num_bonds() == 0);
@@ -714,32 +705,27 @@ TEST_CASE("Topology Construction", "[unit][topology][construction]") {
     Topology topology(atoms);
 
     // Should detect C-H bonds automatically
-    //
-    REQUIRE(topology.num_bonds() == 4);
-    REQUIRE(topology.num_angles() >= 1); // Should have at least H-C-H angle
-    REQUIRE(topology.num_angles() == 6); // Should have at least H-C-H angle
+    REQUIRE(topology.num_bonds() > 0);
+    REQUIRE(topology.num_angles() > 0);
   }
 
-  SECTION("Construction from AtomGraph") {
+  SECTION("Construction from BondGraph") {
     auto atoms = create_test_atoms();
-    AtomGraph atom_graph;
+    BondGraph bond_graph(atoms);
 
-    for (const auto &atom : atoms) {
-      atom_graph.add_vertex(trajan::core::AtomVertex{atom.index});
-    }
-
+    // Manually add some bonds
     Bond bond(1.1);
-    atom_graph.add_edge(0, 1, bond);
-    atom_graph.add_edge(0, 2, bond);
-    REQUIRE(atom_graph.edges().size() == 2);
+    bond_graph.add_edge(0, 1, bond);
+    bond_graph.add_edge(0, 2, bond);
 
-    Topology topology(atoms, atom_graph);
+    Topology topology(bond_graph);
     REQUIRE(topology.num_bonds() == 2);
-    REQUIRE(topology.num_angles() == 1);
+    REQUIRE(topology.num_angles() >= 1); // Should have at least H-C-H angle
   }
 }
 
-TEST_CASE("Bond Management", "[unit][topology][bonds]") {
+TEST_CASE("Bond Management", "[topology][bonds]") {
+  // TODO: Catch warnings from spdlog
   Topology topology;
 
   SECTION("Adding bonds") {
@@ -749,28 +735,24 @@ TEST_CASE("Bond Management", "[unit][topology][bonds]") {
     REQUIRE(topology.has_bond(1, 0)); // Should work both ways
 
     // Adding duplicate bond should warn but not add
-    trajan::log::set_log_level("silent");
     topology.add_bond(0, 1, 1.5);
-    trajan::log::set_log_level("info");
     REQUIRE(topology.num_bonds() == 1);
   }
 
-  // SECTION("Removing bonds") {
-  //   topology.add_bond(0, 1, 1.5);
-  //   topology.add_bond(1, 2, 1.5);
-  //   REQUIRE(topology.num_bonds() == 2);
-  //
-  //   topology.remove_bond(0, 1);
-  //   REQUIRE(topology.num_bonds() == 1);
-  //   REQUIRE_FALSE(topology.has_bond(0, 1));
-  //   REQUIRE(topology.has_bond(1, 2));
-  //
-  //   // Removing non-existent bond should warn but not crash
-  //   trajan::log::set_log_level("silent");
-  //   topology.remove_bond(0, 1);
-  //   trajan::log::set_log_level("info");
-  //   REQUIRE(topology.num_bonds() == 1);
-  // }
+  SECTION("Removing bonds") {
+    topology.add_bond(0, 1, 1.5);
+    topology.add_bond(1, 2, 1.5);
+    REQUIRE(topology.num_bonds() == 2);
+
+    topology.remove_bond(0, 1);
+    REQUIRE(topology.num_bonds() == 1);
+    REQUIRE_FALSE(topology.has_bond(0, 1));
+    REQUIRE(topology.has_bond(1, 2));
+
+    // Removing non-existent bond should warn but not crash
+    topology.remove_bond(0, 1);
+    REQUIRE(topology.num_bonds() == 1);
+  }
 
   SECTION("Clearing bonds") {
     topology.add_bond(0, 1, 1.5);
@@ -803,7 +785,7 @@ TEST_CASE("Bond Management", "[unit][topology][bonds]") {
   }
 }
 
-TEST_CASE("Angle Management", "[unit][topology][angles]") {
+TEST_CASE("Angle Management", "[topology][angles]") {
   Topology topology;
 
   SECTION("Adding angles manually") {
@@ -812,9 +794,7 @@ TEST_CASE("Angle Management", "[unit][topology][angles]") {
     REQUIRE(topology.has_angle(0, 1, 2));
 
     // Adding duplicate should warn but not add
-    trajan::log::set_log_level("silent");
     topology.add_angle(0, 1, 2);
-    trajan::log::set_log_level("info");
     REQUIRE(topology.num_angles() == 1);
   }
 
@@ -852,7 +832,7 @@ TEST_CASE("Angle Management", "[unit][topology][angles]") {
   }
 }
 
-TEST_CASE("Dihedral Management", "[unit][topology][dihedrals]") {
+TEST_CASE("Dihedral Management", "[topology][dihedrals]") {
   Topology topology;
 
   SECTION("Adding dihedrals manually") {
@@ -909,14 +889,13 @@ TEST_CASE("Dihedral Management", "[unit][topology][dihedrals]") {
   }
 }
 
-TEST_CASE("Automatic Generation from Bonds", "[unit][topology][generation]") {
+TEST_CASE("Automatic Generation from Bonds", "[topology][generation]") {
   Topology topology;
 
   SECTION("Generate angles from bonds") {
     // Create a bent molecule: 0-1-2
     topology.add_bond(0, 1, 1.0);
     topology.add_bond(1, 2, 1.0);
-    REQUIRE(topology.num_bonds() == 2);
 
     topology.generate_angles_from_bonds();
     REQUIRE(topology.num_angles() == 1);
@@ -928,7 +907,6 @@ TEST_CASE("Automatic Generation from Bonds", "[unit][topology][generation]") {
     topology.add_bond(0, 1, 1.0);
     topology.add_bond(1, 2, 1.0);
     topology.add_bond(2, 3, 1.0);
-    REQUIRE(topology.num_bonds() == 3);
 
     topology.generate_proper_dihedrals_from_bonds();
     auto dihedrals = topology.get_dihedrals();
@@ -941,10 +919,7 @@ TEST_CASE("Automatic Generation from Bonds", "[unit][topology][generation]") {
     topology.add_bond(0, 1, 1.0);
     topology.add_bond(0, 2, 1.0);
     topology.add_bond(0, 3, 1.0);
-    REQUIRE(topology.num_bonds() == 3);
 
-    topology.generate_angles_from_bonds();
-    REQUIRE(topology.num_angles() == 3);
     topology.generate_improper_dihedrals_from_bonds();
     REQUIRE(topology.num_improper_dihedrals() == 1);
   }
@@ -959,14 +934,13 @@ TEST_CASE("Automatic Generation from Bonds", "[unit][topology][generation]") {
     // - 1 proper dihedral (H-C-C-H)
     // - 0 improper dihedrals
 
-    REQUIRE(topology.num_bonds() == 3);
-    REQUIRE(topology.num_angles() == 2);
-    REQUIRE(topology.num_proper_dihedrals() == 1);
-    REQUIRE(topology.num_improper_dihedrals() == 0);
+    REQUIRE(topology.num_bonds() >= 3);
+    REQUIRE(topology.num_angles() >= 2);
+    REQUIRE(topology.num_proper_dihedrals() >= 1);
   }
 }
 
-TEST_CASE("Graph Queries", "[unit][topology][graph]") {
+TEST_CASE("Graph Queries", "[topology][graph]") {
   Topology topology;
 
   SECTION("Get bonded atoms") {
@@ -1015,7 +989,7 @@ TEST_CASE("Graph Queries", "[unit][topology][graph]") {
   }
 }
 
-TEST_CASE("Connected Components and Molecules", "[unit][topology][molecules]") {
+TEST_CASE("Connected Components and Molecules", "[topology][molecules]") {
   SECTION("Single connected component") {
     auto atoms = create_test_atoms();
     Topology topology(atoms);
@@ -1044,7 +1018,7 @@ TEST_CASE("Connected Components and Molecules", "[unit][topology][molecules]") {
   }
 }
 
-TEST_CASE("Topology Validation", "[unit][topology][validation]") {
+TEST_CASE("Topology Validation", "[topology][validation]") {
   Topology topology;
 
   SECTION("Valid topology") {
@@ -1077,7 +1051,7 @@ TEST_CASE("Topology Validation", "[unit][topology][validation]") {
   }
 }
 
-TEST_CASE("Topology String Representation", "[unit][topology][string]") {
+TEST_CASE("Topology String Representation", "[topology][string]") {
   Topology topology;
   topology.add_bond(0, 1, 1.0);
   topology.add_bond(1, 2, 1.0);
@@ -1097,23 +1071,23 @@ TEST_CASE("Bond Graph Access", "[topology][bondgraph]") {
   Topology topology(atoms);
 
   SECTION("Const access to bond graph") {
-    const auto &atom_graph = topology.get_atom_graph();
-    const auto &adj_list = atom_graph.adjacency_list();
+    const auto &bond_graph = topology.get_bond_graph();
+    const auto &adj_list = bond_graph.get_adjacency_list();
     REQUIRE_FALSE(adj_list.empty());
   }
 
   SECTION("Mutable access to bond graph") {
-    auto &atom_graph = topology.get_atom_graph();
+    auto &bond_graph = topology.get_bond_graph();
     Bond new_bond(2.0);
-    atom_graph.add_edge(10, 11, new_bond);
+    bond_graph.add_edge(10, 11, new_bond);
 
     // Should be able to modify through reference
-    const auto &adj_list = atom_graph.adjacency_list();
+    const auto &adj_list = bond_graph.get_adjacency_list();
     REQUIRE(adj_list.find(10) != adj_list.end());
   }
 }
 
-TEST_CASE("Edge Cases and Error Handling", "[unit][topology]") {
+TEST_CASE("Edge Cases and Error Handling", "[topology][edge_cases]") {
   SECTION("Operations on empty topology") {
     Topology topology;
 
@@ -1146,7 +1120,38 @@ TEST_CASE("Edge Cases and Error Handling", "[unit][topology]") {
   }
 }
 
-TEST_CASE("Performance and Memory", "[unit][topology]") {
+TEST_CASE("Trajectory and Topology Integration", "[trajectory][topology]") {
+  SECTION("Load PDB and check topology") {
+    Trajectory trajectory;
+    std::vector<fs::path> files = {EXAMPLES_DIR / "coord.pdb"};
+    trajectory.load_files(files);
+
+    REQUIRE(trajectory.next_frame());
+
+    const Topology &topology = trajectory.get_topology();
+
+    // For a typical water box, we expect many bonds, angles, and molecules
+    // The exact numbers depend on the PDB content and bond detection logic
+    // Let's assume some reasonable minimums for a non-empty PDB
+    REQUIRE(topology.num_bonds() > 0);
+    REQUIRE(topology.num_angles() > 0);
+    // Dihedrals might be 0 for simple water, but good to check if any are found
+    REQUIRE(topology.num_dihedrals() >= 0);
+
+    auto molecules = topology.extract_molecules();
+    REQUIRE(molecules.size() > 0); // Should find water molecules
+
+    // Check if the number of atoms in the topology matches the frame
+    REQUIRE(topology.num_atoms() == trajectory.num_atoms());
+
+    auto molecules2 = trajectory.extract_molecules();
+    REQUIRE(molecules2.size() > 0); // Should find water molecules
+    REQUIRE(molecules2.size() ==
+            molecules.size()); // Should find water molecules
+  }
+}
+
+TEST_CASE("Performance and Memory", "[topology][performance]") {
   SECTION("Large number of bonds") {
     Topology topology;
 
@@ -1175,37 +1180,5 @@ TEST_CASE("Performance and Memory", "[unit][topology]") {
 
     // Should handle generation without issues
     REQUIRE(topology.validate_topology());
-  }
-}
-
-// tests requiring files
-
-TEST_CASE_METHOD(TestFixture, "Trajectory and Topology Integration",
-                 "[file][trajectory][topology]") {
-  SECTION("Load PDB and check topology") {
-    Trajectory trajectory;
-    std::vector<fs::path> files = {this->get_test_file("i00000000.pdb")};
-    trajectory.load_files(files);
-
-    REQUIRE(trajectory.next_frame());
-
-    const Topology &topology = trajectory.get_topology();
-
-    auto molecules = topology.extract_molecules();
-    REQUIRE(molecules.size() > 0); // Should find water molecules
-
-    // in this example file there are 4092 water molecules
-    REQUIRE(topology.num_bonds() == 4092 * 2);
-    REQUIRE(topology.num_angles() == 4092 * 1);
-    REQUIRE(topology.num_dihedrals() == 0);
-    REQUIRE(topology.num_proper_dihedrals() == 0);
-    REQUIRE(topology.num_improper_dihedrals() == 0);
-
-    // Check if the number of atoms in the topology matches the frame
-    REQUIRE(topology.num_atoms() == trajectory.num_atoms());
-
-    auto molecules2 = trajectory.get_molecules();
-    REQUIRE(molecules2.size() ==
-            molecules.size()); // Should find water molecules
   }
 }

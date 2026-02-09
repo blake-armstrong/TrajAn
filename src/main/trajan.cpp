@@ -1,7 +1,9 @@
+#include "spdlog/spdlog.h"
 #include <CLI/App.hpp>
 #include <trajan/core/log.h>
 #include <trajan/core/trajectory.h>
 // #include <trajan/main/trajan_opt.h>
+#include <trajan/main/trajan_info.h>
 #include <trajan/main/trajan_load.h>
 #include <trajan/main/trajan_rdf.h>
 #include <trajan/main/trajan_topology.h>
@@ -31,11 +33,14 @@ int main(int argc, char *argv[]) {
 
   // add all the subcommands here
   auto *load = trajan::main::add_load_subcommand(app, trajectory);
-  auto *top = trajan::main::add_topology_subcommand(*load, trajectory);
-  auto *rdf = trajan::main::add_rdf_subcommand(*load, trajectory);
+  auto *top = trajan::main::add_topology_subcommand(app, trajectory);
+  auto *info = trajan::main::add_info_subcommand(app, trajectory);
+  auto *rdf = trajan::main::add_rdf_subcommand(app, trajectory);
+
   // auto *opt = trajan::main::add_opt_subcommand(app);
 
   // display default info
+  spdlog::set_pattern("%v");
   trajan::main::print_header();
 
   // used to ensure we have a subcommand
@@ -62,7 +67,8 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  trajan::log::info("TRAJAN terminated successfully.");
+  spdlog::set_pattern("%v");
+  trajan::log::info("\nTRAJAN terminated successfully.");
 
   return 0;
 }

@@ -1,11 +1,9 @@
 #pragma once
 #include <occ/core/atom.h>
-#include <optional>
-#include <trajan/core/atomgraph.h>
-// #include <trajan/core/element.h>
-// #include <trajan/core/linear_algebra.h>
 #include <occ/core/element.h>
 #include <occ/core/linear_algebra.h>
+#include <optional>
+#include <trajan/core/atomgraph.h>
 
 namespace trajan::core {
 

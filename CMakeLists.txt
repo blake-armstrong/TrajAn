@@ -34,10 +34,6 @@ if("${WITH_PYTHON_BINDINGS}")
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 endif()
 
-# option(USE_OPENMP "Use OpenMP for threading" ON)
-find_package(OpenMP)
-
-
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CPM.cmake")
 # don't use install commands from third party
 add_subdirectory(3rdparty EXCLUDE_FROM_ALL)

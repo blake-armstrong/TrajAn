@@ -19,35 +19,39 @@ using trajan::units::radians;
 using Atom = trajan::core::EnhancedAtom;
 
 bool PDBHandler::_initialise() {
-  if (m_mode == Mode::Read) {
+  switch (m_mode) {
+  case Mode::Read:
     m_infile.open(this->file_path());
     return m_infile.is_open();
-  } else {
+  case Mode::Write:
     m_outfile.open(this->file_path());
     return m_outfile.is_open();
-  }
+  };
 }
 
 void PDBHandler::_finalise() {
-  if (m_mode == Mode::Read) {
+  switch (m_mode) {
+  case Mode::Read:
     if (m_infile.is_open()) {
       m_infile.close();
     }
-  } else {
+    return;
+  case Mode::Write:
     if (m_outfile.is_open()) {
       m_outfile.flush();
       m_outfile.close();
     }
+    return;
   }
 }
 
 bool PDBHandler::parse_pdb(Frame &frame) {
-
+  trajan::log::trace("Attempting to parse PDB file");
   std::vector<core::Atom> atoms;
   std::string line;
   while (std::getline(m_infile, line)) {
     if (line.substr(0, 6) == "CRYST1") {
-      trajan::log::debug("Found unit cell from CRYST1 line in PDB.");
+      trajan::log::trace("Found unit cell from CRYST1 line in PDB");
       double a, b, c, alpha, beta, gamma;
       char record_name[7], sg[12], z[5];
       int result =
@@ -60,6 +64,8 @@ bool PDBHandler::parse_pdb(Frame &frame) {
                                    radians(gamma));
       frame.set_unit_cell(uc);
       continue;
+    }
+    if (line.substr(0, 6) == "CONECT") {
     }
     if (line.substr(0, 4) != "ATOM" && line.substr(0, 6) != "HETATM") {
       continue;
@@ -105,6 +111,8 @@ bool PDBHandler::parse_pdb(Frame &frame) {
     atoms.push_back(atom);
   }
   frame.set_atoms(atoms);
+  trajan::log::trace("Found {} atoms in PDB file", atoms.size());
+  trajan::log::trace("Successfully parsed PDB file");
   return true;
 }
 
@@ -124,6 +132,7 @@ bool PDBHandler::write_next_frame(const Frame &frame) {
   const auto &uc = frame.unit_cell();
 
   if (uc.has_value()) {
+    trajan::log::trace("No unit cell info to write to PDB");
     const auto &unit_cell = uc.value();
     m_outfile << fmt::format("CRYST1{:9.3f}{:9.3f}{:9.3f}{:7.2f}{:7.2f}{:7.2f} "
                              "P 1           1",
@@ -132,6 +141,8 @@ bool PDBHandler::write_next_frame(const Frame &frame) {
                              trajan::units::degrees(unit_cell.beta()),
                              trajan::units::degrees(unit_cell.gamma()))
               << std::endl;
+  } else {
+    trajan::log::trace("Writing unit cell info to PDB");
   }
 
   int i = 1;
@@ -156,7 +167,7 @@ bool PDBHandler::write_next_frame(const Frame &frame) {
                     atom.element.symbol(),  // 2 chars
                     ""                      // charge (2 chars)
         );
-    trajan::log::debug("Writing PDB line: {}", line);
+    trajan::log::trace("Writing PDB line: {}", line);
     m_outfile << line << std::endl;
     i++;
   }

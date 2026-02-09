@@ -1,4 +1,5 @@
 #include "core_bindings.h"
+#include "nanobind/nanobind.h"
 #include <Eigen/Core>
 #include <nanobind/eigen/dense.h>
 #include <nanobind/stl/array.h>
@@ -12,7 +13,7 @@
 #include <trajan/core/trajectory.h>
 
 using namespace trajan::core;
-using trajan::Vec3;
+using occ::Vec3;
 
 nb::module_ register_core_bindings(nb::module_ &m) {
   using namespace nb::literals;
@@ -41,8 +42,6 @@ nb::module_ register_core_bindings(nb::module_ &m) {
 
   nb::class_<Atom>(m, "Atom")
       .def(nb::init<const Vec3 &, int, int>())
-      .def_prop_rw("position", &Atom::position, &Atom::update_position,
-                   "Cartesian position of the atom")
       .def_prop_ro(
           "element", [](const Atom &a) { return a.element; }, "Atom's element")
       .def("__repr__", [](const Atom &a) {
@@ -52,13 +51,12 @@ nb::module_ register_core_bindings(nb::module_ &m) {
 
   nb::class_<Molecule>(m, "Molecule")
       .def(nb::init<const std::vector<Atom> &>())
-      .def(nb::init<const graph::ConnectedComponent<Atom, Bond> &>())
       .def("__len__", &Molecule::size)
       .def("atomic_masses", &Molecule::atomic_masses)
-      .def("centre_of_mass", &Molecule::centre_of_mass)
+      .def("centre_of_mass", &Molecule::center_of_mass)
       .def("centroid", &Molecule::centroid)
       .def("__repr__", [](const Molecule &mol) {
-        auto com = mol.centre_of_mass();
+        auto com = mol.center_of_mass();
         return fmt::format("<Molecule {} @[{:.5f}, {:.5f}, {:.5f}]>", mol.type,
                            com.x(), com.y(), com.z());
       });
@@ -68,10 +66,10 @@ nb::module_ register_core_bindings(nb::module_ &m) {
       .def(nb::init<>())
       .def(nb::init<double>(), "bond_length"_a)
       .def_rw("bond_length", &Bond::bond_length)
-      .def_rw("idxs", &Bond::idxs)
+      .def_rw("idxs", &Bond::indices)
       .def("__repr__", [](const Bond &b) {
         return fmt::format("Bond(length={:.3f}, idxs=({}, {}))", b.bond_length,
-                           b.idxs.first, b.idxs.second);
+                           b.indices.first, b.indices.second);
       });
 
   // Angle structure
@@ -121,14 +119,15 @@ nb::module_ register_core_bindings(nb::module_ &m) {
   // Topology class - the main class
   nb::class_<Topology>(m, "Topology")
       .def(nb::init<>())
-      .def(nb::init<const BondGraph &>(), "bond_graph"_a)
       .def(nb::init<const std::vector<Atom> &>(), "atoms"_a)
+      .def(nb::init<const std::vector<Atom> &, const AtomGraph &>(), "atoms"_a,
+           "atom_graph"_a)
 
       // Bond management
       .def("add_bond", &Topology::add_bond, "atom1"_a, "atom2"_a,
            "bond_length"_a = 0.0, "Add a bond between two atoms")
-      .def("remove_bond", &Topology::remove_bond, "atom1"_a, "atom2"_a,
-           "Remove a bond between two atoms")
+      // .def("remove_bond", &Topology::remove_bond, "atom1"_a, "atom2"_a,
+      //      "Remove a bond between two atoms")
       .def("has_bond", &Topology::has_bond, "atom1"_a, "atom2"_a,
            "Check if bond exists between two atoms")
       .def("clear_bonds", &Topology::clear_bonds, "Clear all bonds")
@@ -203,13 +202,13 @@ nb::module_ register_core_bindings(nb::module_ &m) {
            "Convert topology to string representation")
 
       // Access to underlying graph
-      .def("get_bond_graph",
-           static_cast<const BondGraph &(Topology::*)() const>(
-               &Topology::get_bond_graph),
+      .def("get_atom_graph",
+           static_cast<const AtomGraph &(Topology::*)() const>(
+               &Topology::get_atom_graph),
            nb::rv_policy::reference_internal,
            "Get underlying bond graph (const)")
-      .def("get_bond_graph",
-           static_cast<BondGraph &(Topology::*)()>(&Topology::get_bond_graph),
+      .def("get_atom_graph",
+           static_cast<AtomGraph &(Topology::*)()>(&Topology::get_atom_graph),
            nb::rv_policy::reference_internal,
            "Get underlying bond graph (mutable)")
 
@@ -245,7 +244,7 @@ nb::module_ register_core_bindings(nb::module_ &m) {
       .def_prop_ro("unit_cell", &Trajectory::unit_cell)
       .def_prop_ro("topology", &Trajectory::get_topology)
       .def("update_topology", &Trajectory::update_topology)
-      .def("extract_molecules", &Trajectory::extract_molecules); //
+      .def("get_molecules", nb::overload_cast<>(&Trajectory::get_molecules));
 
   // Utility functions
   m.def("dihedral_type_to_string", &dihedral_type_to_string, "type"_a,

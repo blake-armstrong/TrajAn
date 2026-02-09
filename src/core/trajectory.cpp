@@ -41,7 +41,7 @@ void Trajectory::load_files(const std::vector<fs::path> &files) {
   if (m_handlers.empty()) {
     throw std::runtime_error("Could not load files.");
   }
-
+  trajan::log::debug("First file will be initialised for parsing: ");
   m_handlers[0]->initialise(io::FileHandler::Mode::Read);
 }
 
@@ -113,6 +113,11 @@ bool Trajectory::_next_frame() {
 
 bool Trajectory::next_frame() {
   bool next = this->_next_frame();
+  bool update_top = this->next_topology_update();
+  if (update_top) {
+    this->update_topology(m_topology_settings);
+    m_topology_needs_update = false;
+  }
   if (next) {
     return next;
   }
@@ -122,6 +127,22 @@ bool Trajectory::next_frame() {
   }
   this->load_files(m_files);
   return next;
+}
+
+bool Trajectory::next_topology_update() {
+  if (!m_topology_settings.compute_topology) {
+    return false;
+  }
+  if (m_topology_settings.update_frequency == 0) {
+    if (m_current_frame_index > 1) {
+      return false;
+    }
+  }
+  if (!((m_current_frame_index - 1) % m_topology_settings.update_frequency ==
+        0)) {
+    return false;
+  }
+  return true;
 }
 
 void Trajectory::write_frame() {
@@ -137,6 +158,7 @@ void Trajectory::write_frame() {
 }
 
 void Trajectory::reset() {
+  trajan::log::debug("Resetting file handlers:");
   for (auto &handler : m_handlers) {
     if (handler) {
       handler->finalise();
@@ -146,6 +168,17 @@ void Trajectory::reset() {
   m_current_handler_index = 0;
   m_current_frame_index = 0;
   m_frame_loaded = false;
+}
+
+void Trajectory::set_topology_settings(const TopologyUpdateSettings &settings) {
+  m_topology_settings = settings;
+  trajan::log::debug("Settings for topology have been updated: ");
+  trajan::log::debug("  compute_topology: {}", settings.compute_topology);
+  trajan::log::debug("  top_auto: {}", settings.top_auto);
+  trajan::log::debug("  update_frequency: {} frames",
+                     settings.update_frequency);
+  trajan::log::debug("  bond_tolerance: {} Angstroms", settings.bond_tolerance);
+  // TODO: print bonbonds and bondcutoffs
 }
 
 const std::vector<EntityVariant>
@@ -219,7 +252,7 @@ const std::vector<Molecule> Trajectory::get_molecules(
 const Topology &Trajectory::get_topology(
     const std::optional<TopologyUpdateSettings> &opt_settings) {
   if (m_topology_needs_update ||
-      m_topology_update_frequency == m_current_frame_index) {
+      m_topology_settings.update_frequency == m_current_frame_index) {
     this->update_topology(opt_settings);
     m_topology_needs_update = false;
   }
@@ -228,6 +261,8 @@ const Topology &Trajectory::get_topology(
 
 void Trajectory::update_topology(
     const std::optional<TopologyUpdateSettings> &opt_settings) {
+  trajan::log::debug("Updating topology:");
+
   const std::vector<Atom> &atoms = this->atoms();
 
   if (atoms.empty()) {
@@ -240,23 +275,33 @@ void Trajectory::update_topology(
 
   auto final_settings = opt_settings.value_or(default_settings);
 
-  trajan::log::debug("Creating atom graph");
+  trajan::log::trace("Creating atom graph inside update_topology");
   AtomGraph atom_graph;
   std::vector<AtomGraph::VertexDescriptor> atom_graph_vertices;
   for (int i = 0; i < atoms.size(); i++) {
     atom_graph.add_vertex(trajan::core::AtomVertex{i});
   }
-  trajan::log::debug("Atom graph created successfully");
+  trajan::log::trace("Atom graph created");
   double max_cov_radii = occ::core::max_covalent_radius();
+  trajan::log::debug("Maximum covalent radius: {:.4f} Angstroms",
+                     max_cov_radii);
+  trajan::log::debug("Bond tolerance: {:.4f} Angstroms",
+                     final_settings.bond_tolerance);
   double max_cov_cutoff = max_cov_radii + final_settings.bond_tolerance;
-  trajan::log::debug(
-      "Creating NeighbourList with cutoff {:.3f} ({:.3f} + {:.3f}) Angstroms",
-      max_cov_cutoff, max_cov_radii, final_settings.bond_tolerance);
+  trajan::log::debug("Creating topology neighbour list with cutoff: ");
+  trajan::log::debug("  {:.3f} ({:.3f} + {:.3f}) Angstroms", max_cov_cutoff,
+                     max_cov_radii, final_settings.bond_tolerance);
   NeighbourList nl(max_cov_cutoff);
-  trajan::log::debug("NeighbourList created, updating with atoms");
-
+  trajan::log::trace("Neighbour list initialised");
+  trajan::log::trace("  updating neighbour list with atoms");
+  auto uc = this->unit_cell();
+  if (uc.has_value()) {
+    trajan::log::trace("  updating neighbour list with unit cell");
+  } else {
+    trajan::log::trace("  no unit cell to update neighbour list with");
+  }
   nl.update(atoms, this->unit_cell());
-  trajan::log::debug("NeighbourList updated successfully");
+  trajan::log::trace("Neighbour list updated successfully");
 
   size_t bond_count = 0;
 
@@ -313,10 +358,10 @@ void Trajectory::update_topology(
     bond_count++;
   };
 
-  trajan::log::debug("Starting neighbour iteration...");
+  trajan::log::trace("Starting neighbour iteration");
   nl.iterate_neighbours(func);
-  trajan::log::debug("Neighbour iteration complete, found {} bonds",
-                     bond_count);
+  trajan::log::trace("Finished neighbour iteration");
+  trajan::log::debug("Found {} bonds", bond_count);
   m_topology = Topology(atoms, atom_graph);
 }
 
