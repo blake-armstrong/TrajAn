@@ -45,15 +45,22 @@ void run_rdf_subcommand(const RDFOpts &opts, Trajectory &traj) {
   core::NeighbourList nl(opts.rcut);
 
   using EntityVariants = std::vector<core::EntityVariant>;
+  EntityVariants entities1;
+  EntityVariants entities2;
 
   size_t frame_count = 0;
   while (traj.next_frame()) {
-    EntityVariants selection1 = traj.get_entities(parsed_sel1);
-    EntityVariants selection2 = traj.get_entities(parsed_sel2);
+    if (frame_count == 0 || traj.topology_has_changed()) {
+      entities1 = traj.get_entities(parsed_sel1);
+      entities2 = traj.get_entities(parsed_sel2);
+    } else {
+      traj.update_entities(entities1);
+      traj.update_entities(entities2);
+    }
     // TODO: molecule origin input
 
     auto uc = traj.unit_cell();
-    nl.update({selection1, selection2}, uc);
+    nl.update({entities1, entities2}, uc);
 
     std::fill(rdf.nofr.begin(), rdf.nofr.end(), 0.0);
 
@@ -68,7 +75,7 @@ void run_rdf_subcommand(const RDFOpts &opts, Trajectory &traj) {
     if (uc) {
       volume = uc.value().volume();
     }
-    double density_norm = selection1.size() * selection2.size() / volume;
+    double density_norm = entities1.size() * entities2.size() / volume;
     for (size_t i = 0; i < opts.nbins; i++) {
       double ri = rdf.r[i];
       double shell_volume = norm * (std::pow(ri + bin_width / 2, 3) -

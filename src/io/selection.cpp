@@ -1,3 +1,4 @@
+#include "trajan/core/neigh.h"
 #include <string>
 #include <trajan/core/util.h>
 #include <trajan/io/selection.h>
@@ -40,14 +41,15 @@ SelectionParser::parse_selection(const std::string &input) {
     values.erase(std::unique(values.begin(), values.end()), values.end());
 
     if constexpr (std::is_same_v<SelectionType, AtomIndexSelection>) {
-      return SelectionCriteria{AtomIndexSelection{std::move(values)}};
+      return SelectionCriteria{AtomIndexSelection{std::move(values), input}};
     } else if constexpr (std::is_same_v<SelectionType,
                                         MoleculeIndexSelection>) {
-      return SelectionCriteria{MoleculeIndexSelection{std::move(values)}};
+      return SelectionCriteria{
+          MoleculeIndexSelection{std::move(values), input}};
     } else if constexpr (std::is_same_v<SelectionType, AtomTypeSelection>) {
-      return SelectionCriteria{AtomTypeSelection{std::move(values)}};
+      return SelectionCriteria{AtomTypeSelection{std::move(values), input}};
     } else if constexpr (std::is_same_v<SelectionType, MoleculeTypeSelection>) {
-      return SelectionCriteria{MoleculeTypeSelection{std::move(values)}};
+      return SelectionCriteria{MoleculeTypeSelection{std::move(values), input}};
     }
   } catch (...) {
     return std::nullopt;
@@ -116,6 +118,9 @@ SelectionParser::parse(const std::string &input) {
     case SelectionTraits<MoleculeIndexSelection>::prefix:
       result = parse_selection<MoleculeIndexSelection>(current_token);
       break;
+    case SelectionTraits<MoleculeTypeSelection>::prefix:
+      result = parse_selection<MoleculeTypeSelection>(current_token);
+      break;
     }
     if (!result)
       return std::nullopt;
@@ -163,6 +168,138 @@ void print_parsed_selection(const std::vector<SelectionCriteria> &result) {
   trajan::log::debug("  molecule types: {}",
                      trajan::util::format_vector(molecule_types, 60));
 };
+
+void process_selection(const SelectionCriteria &selection,
+                       const std::vector<Atom> &atoms,
+                       const std::vector<Molecule> &molecules,
+                       std::vector<core::EntityVariant> &entities) {
+  std::visit(
+      [&](const auto &sel) {
+        using SelType = std::decay_t<decltype(sel)>;
+        trajan::log::debug("Processing selection '{}'", sel.raw_input());
+        trajan::log::debug("Selection identified as '{}'", sel.name());
+
+        if constexpr (std::is_same_v<SelType, io::AtomIndexSelection>) {
+          trajan::log::debug(
+              "The following atoms have been idenitified from {}:", sel.name());
+          trajan::log::debug(" NB: atoms are only printed if log level is 4.");
+          for (const Atom &atom : atoms) {
+            for (const int &ai : sel) {
+              if (atom.index == ai) {
+                entities.push_back(atom);
+                trajan::log::trace(" {}", atom.repr());
+              }
+            }
+          }
+        } else if constexpr (std::is_same_v<SelType, io::AtomTypeSelection>) {
+          trajan::log::debug(
+              "The following atoms have been idenitified from {}:", sel.name());
+          trajan::log::debug(" NB: atoms are only printed if log level is 4.");
+          for (const Atom &atom : atoms) {
+            for (const std::string &at : sel) {
+              if (atom.type == at) {
+                entities.push_back(atom);
+                trajan::log::trace(" {}", atom.repr());
+              }
+            }
+          }
+        } else if constexpr (std::is_same_v<SelType,
+                                            io::MoleculeIndexSelection>) {
+          trajan::log::debug(
+              "The following molecules have been idenitified from {}:",
+              sel.name());
+          trajan::log::debug(" NB: atoms are only printed if log level is 4.");
+          for (const Molecule &molecule : molecules) {
+            for (const int &mi : sel) {
+              if (molecule.index == mi) {
+                entities.push_back(molecule);
+                trajan::log::trace("  {}", molecule.repr());
+              }
+            }
+          }
+        } else if constexpr (std::is_same_v<SelType,
+                                            io::MoleculeTypeSelection>) {
+          trajan::log::debug(
+              "The following molecules have been idenitified from {}:",
+              sel.name());
+          trajan::log::debug(" NB: atoms are only printed if log level is 4.");
+          for (const Molecule &molecule : molecules) {
+            for (const std::string &mt : sel) {
+              if (molecule.type == mt) {
+                entities.push_back(molecule);
+                trajan::log::trace("  {}", molecule.repr());
+              }
+            }
+          }
+        }
+        size_t num_entities = entities.size();
+        if (num_entities == 0) {
+          throw std::runtime_error(fmt::format(
+              "No entities found in selection '{}'", sel.raw_input()));
+        };
+        trajan::log::debug("Identified {} entities in selection '{}'",
+                           num_entities, sel.raw_input());
+      },
+      selection);
+};
+
+void process_selection(const std::vector<SelectionCriteria> &selections,
+                       const std::vector<Atom> &atoms,
+                       const std::vector<Molecule> &molecules,
+                       std::vector<core::EntityVariant> &entities) {
+
+  for (const auto &selection : selections) {
+    process_selection(selection, atoms, molecules, entities);
+  }
+
+  std::sort(entities.begin(), entities.end(), [](const auto &a, const auto &b) {
+    auto get_sort_key = [](const auto &entity) {
+      return std::visit(
+          [](const auto &e) {
+            return std::make_pair(typeid(e).hash_code(), e.index);
+          },
+          entity);
+    };
+    return get_sort_key(a) < get_sort_key(b);
+  });
+
+  entities.erase(
+      std::unique(entities.begin(), entities.end(),
+                  [](const auto &a, const auto &b) {
+                    auto is_same_type_and_index = [](const auto &a_entity,
+                                                     const auto &b_entity) {
+                      return std::visit(
+                          [&](const auto &a_val, const auto &b_val) {
+                            using TypeA = std::decay_t<decltype(a_val)>;
+                            using TypeB = std::decay_t<decltype(b_val)>;
+                            if constexpr (std::is_same_v<TypeA, TypeB>) {
+                              return a_val.index == b_val.index;
+                            }
+                            return false;
+                          },
+                          a_entity, b_entity);
+                    };
+                    return is_same_type_and_index(a, b);
+                  }),
+      entities.end());
+}
+
+void update_entities_with_positions(std::vector<core::EntityVariant> &entities,
+                                    const std::vector<Atom> &atoms,
+                                    const std::vector<Molecule> &molecules) {
+  for (core::EntityVariant &entity : entities) {
+    std::visit(
+        [&](auto &e) {
+          using ent_type = std::decay_t<decltype(e)>;
+          if constexpr (std::is_same_v<ent_type, core::Atom>) {
+            e = atoms[e.index];
+          } else if constexpr (std::is_same_v<ent_type, core::Molecule>) {
+            e = molecules[e.index];
+          }
+        },
+        entity);
+  }
+}
 
 std::vector<SelectionCriteria>
 selection_validator(const std::string &input,

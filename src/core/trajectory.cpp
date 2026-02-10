@@ -1,5 +1,3 @@
-#include "occ/core/bondgraph.h"
-#include "occ/core/units.h"
 #include <algorithm>
 #include <cmath>
 #include <mach/message.h>
@@ -116,7 +114,8 @@ bool Trajectory::next_frame() {
   bool update_top = this->next_topology_update();
   if (update_top) {
     this->update_topology(m_topology_settings);
-    m_topology_needs_update = false;
+  } else {
+    m_topology_has_changed = false;
   }
   if (next) {
     return next;
@@ -181,14 +180,12 @@ void Trajectory::set_topology_settings(const TopologyUpdateSettings &settings) {
   // TODO: print bonbonds and bondcutoffs
 }
 
-const std::vector<EntityVariant>
+std::vector<EntityVariant>
 Trajectory::get_entities(const io::SelectionCriteria &selection) {
   const std::vector<Atom> atoms = this->atoms();
   std::vector<Molecule> molecules;
-  std::vector<EntityVariant> entities;
+  std::vector<core::EntityVariant> entities{};
   entities.reserve(atoms.size());
-
-  trajan::log::debug("Processing selection {}", selection.index());
 
   if (std::holds_alternative<io::MoleculeIndexSelection>(selection) ||
       std::holds_alternative<io::MoleculeTypeSelection>(selection)) {
@@ -196,25 +193,12 @@ Trajectory::get_entities(const io::SelectionCriteria &selection) {
     molecules = this->get_molecules();
   }
 
-  entities = std::visit(
-      [&](const auto &sel) {
-        using ActualType = std::decay_t<decltype(sel)>;
-        return io::process_selection<ActualType>(sel, atoms, molecules,
-                                                 entities);
-      },
-      selection);
-
-  size_t num_entities = entities.size();
-  if (num_entities == 0) {
-    // FIXME: Fix the selection names for clarity.
-    throw std::runtime_error("No entities found in selection.");
-  }
-  trajan::log::debug("Identified {} entities in selection", num_entities);
+  io::process_selection(selection, atoms, molecules, entities);
 
   return entities;
 }
 
-const std::vector<EntityVariant>
+std::vector<EntityVariant>
 Trajectory::get_entities(const std::vector<io::SelectionCriteria> &selections) {
   std::vector<EntityVariant> entities;
   for (const io::SelectionCriteria &sel : selections) {
@@ -225,36 +209,39 @@ Trajectory::get_entities(const std::vector<io::SelectionCriteria> &selections) {
   return entities;
 }
 
-const std::vector<Atom>
+void Trajectory::update_entities(std::vector<EntityVariant> &entities) {
+  io::update_entities_with_positions(entities, this->atoms(),
+                                     this->get_molecules());
+}
+
+std::vector<Atom>
 Trajectory::get_atoms(const io::SelectionCriteria &selection) {
   const std::vector<EntityVariant> entities = this->get_entities(selection);
   return core::get_entities_of_type<Atom>(entities);
 }
 
-const std::vector<Atom>
+std::vector<Atom>
 Trajectory::get_atoms(const std::vector<io::SelectionCriteria> &selections) {
   const std::vector<EntityVariant> entities = this->get_entities(selections);
   return core::get_entities_of_type<Atom>(entities);
 }
 
-const std::vector<Molecule>
+std::vector<Molecule>
 Trajectory::get_molecules(const io::SelectionCriteria &selection) {
   const std::vector<EntityVariant> entities = this->get_entities(selection);
   return core::get_entities_of_type<Molecule>(entities);
 }
 
-const std::vector<Molecule> Trajectory::get_molecules(
+std::vector<Molecule> Trajectory::get_molecules(
     const std::vector<io::SelectionCriteria> &selections) {
   const std::vector<EntityVariant> entities = this->get_entities(selections);
   return core::get_entities_of_type<Molecule>(entities);
 }
 
-const Topology &Trajectory::get_topology(
+Topology &Trajectory::get_topology(
     const std::optional<TopologyUpdateSettings> &opt_settings) {
-  if (m_topology_needs_update ||
-      m_topology_settings.update_frequency == m_current_frame_index) {
+  if (m_topology_needs_update || this->next_topology_update()) {
     this->update_topology(opt_settings);
-    m_topology_needs_update = false;
   }
   return m_topology;
 }
@@ -363,9 +350,11 @@ void Trajectory::update_topology(
   trajan::log::trace("Finished neighbour iteration");
   trajan::log::debug("Found {} bonds", bond_count);
   m_topology = Topology(atoms, atom_graph);
+  m_topology_has_changed = true;
+  m_topology_needs_update = false;
 }
 
-const std::vector<Molecule> Trajectory::get_molecules() {
+std::vector<Molecule> Trajectory::get_molecules() {
   if (m_topology_needs_update) {
     this->update_topology();
   }

@@ -83,8 +83,6 @@ void NeighbourListPacket::initialise_from_entities(
         },
         obj);
   }
-  trajan::log::debug("Number of cartesian positions from entities = {}",
-                     cart_pos.cols());
 }
 NeighbourListPacket::NeighbourListPacket(
     const std::vector<EntityVariant> &entities, Molecule::Origin o) {

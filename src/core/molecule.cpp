@@ -19,4 +19,12 @@ convert_atoms(const std::vector<Atom> &atoms) {
 EnhancedMolecule::EnhancedMolecule(const std::vector<Atom> &atoms)
     : occ::core::Molecule(convert_atoms(atoms)), enhanced_atoms(atoms) {}
 
+std::vector<int> EnhancedMolecule::atom_indices() const {
+  std::vector<int> atom_indices(enhanced_atoms.size());
+  for (const auto &atom : enhanced_atoms) {
+    atom_indices.push_back(atom.index);
+  }
+  return atom_indices;
+}
+
 }; // namespace trajan::core

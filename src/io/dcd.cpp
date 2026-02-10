@@ -153,81 +153,83 @@ bool DCDHandler::_parse_dcd_header() {
     throw std::runtime_error("DCD header record too small");
   }
 
-  // Check signature
+  trajan::log::debug("Header record size: {} bytes", header_buffer.size());
+
   char signature[4];
   std::memcpy(signature, header_buffer.data(), 4);
+  trajan::log::debug("File signature: '{}'", signature);
+
   if (std::strncmp(signature, "CORD", 4) != 0) {
     throw std::runtime_error("Invalid DCD signature");
   }
 
-  // Parse header fields
   int32_t *int_data = reinterpret_cast<int32_t *>(header_buffer.data());
-  trajan::log::debug("DCD Header Integer Fields");
-  for (int i = 0; i < 21; ++i) {
-    trajan::log::debug("int_data[{}] = {} (0x{:08x}) [byte {}]", i, int_data[i],
-                       static_cast<uint32_t>(int_data[i]), i * 4);
-  }
 
   m_total_frames = static_cast<size_t>(int_data[1]); // NFILE
-  m_total_frames = static_cast<size_t>(int_data[1]); // NFILE
-  int32_t first_frame = int_data[2];                 // NPRIV
-  int32_t frame_skip = int_data[3];                  // NSAVC
-  int32_t total_steps = int_data[4];                 // NSTEP
-  int32_t namnf = int_data[9]; // NAMNF (fixed atoms) - byte 36
-  m_timestep = static_cast<double>(int_data[10]);
+  int32_t first_timestep = int_data[2];              // ISTART
+  int32_t save_frequency = int_data[3];              // NSAVC
+  int32_t total_timesteps = int_data[4];             // NSTEP
+  int32_t num_fixed_atoms = int_data[9];             // NAMNF
+  int32_t charmm_version = int_data[20];             // CHARMM version
 
-  trajan::log::debug("DCD Header Parsed Fields");
-  trajan::log::debug("NFILE (total frames): {}", m_total_frames);
-  trajan::log::debug("ISTART (first frame): {}", first_frame);
-  trajan::log::debug("NSAVC (frame skip): {}", frame_skip);
-  trajan::log::debug("NSTEP (total steps): {}", total_steps);
-  trajan::log::debug("NAMNF (fixed atoms): {}", namnf);
+  trajan::log::debug("Trajectory parameters:");
+  trajan::log::debug("  Total frames:        {}", m_total_frames);
+  trajan::log::debug("  First timestep:      {}", first_timestep);
+  trajan::log::debug("  Save frequency:      {} (every {} steps)",
+                     save_frequency, save_frequency);
+  trajan::log::debug("  Total timesteps:     {}", total_timesteps);
+  trajan::log::debug("  Fixed atoms:         {}", num_fixed_atoms);
 
-  // Parse delta (timestep) - different format for CHARMM vs X-PLOR
-  double delta;
-  if (int_data[20] != 0) { // CHARMM version field
+  if (charmm_version != 0) {
     m_is_charmm_format = true;
-    m_has_extra_block = (int_data[11] != 0); // Position 40 in bytes / 4
-    m_has_4d_coords = (int_data[12] == 1);   // Position 44 in bytes / 4
+    m_has_extra_block = (int_data[11] != 0);
+    m_has_4d_coords = (int_data[12] == 1);
 
-    // CHARMM stores delta as float
-    delta = static_cast<double>(int_data[10]); // Position 36 in bytes / 4
-    trajan::log::debug("CHARMM version field: {}", int_data[20]);
-    trajan::log::debug("Extra block flag (unit cell flag): {}", int_data[11]);
-    trajan::log::debug("4D coords flag: {}", int_data[12]);
-    trajan::log::debug("Delta (timestep): {}", delta);
+    float timestep_float;
+    std::memcpy(&timestep_float, &int_data[10], sizeof(float));
+    m_timestep = static_cast<double>(timestep_float);
+
+    trajan::log::debug("File format: CHARMM (version {})", charmm_version);
+    trajan::log::debug("  Unit cell data:      {}",
+                       m_has_extra_block ? "present" : "absent");
+    trajan::log::debug("  4D coordinates:      {}",
+                       m_has_4d_coords ? "yes" : "no");
+    trajan::log::debug("  Timestep:            {} (float)", m_timestep);
   } else {
+    // X-PLOR format
     m_is_charmm_format = false;
     m_has_extra_block = false;
     m_has_4d_coords = false;
 
-    // X-PLOR stores delta as double
-    delta = static_cast<double>(int_data[10]); // Position 36 in bytes / 4
-    trajan::log::debug("X-PLOR Format");
-    trajan::log::debug("Delta as double (byte 40): {}", delta);
+    double timestep_double;
+    std::memcpy(&timestep_double, &int_data[10], sizeof(double));
+    m_timestep = timestep_double;
+
+    trajan::log::debug("File format: X-PLOR");
+    trajan::log::debug("  Timestep:            {} (double)", m_timestep);
   }
 
-  trajan::log::debug("Summary");
-  trajan::log::debug("Total frames: {}", m_total_frames);
-  trajan::log::debug("CHARMM format: {}", m_is_charmm_format ? "Yes" : "No");
-  trajan::log::debug("Has extra block: {}", m_has_extra_block ? "Yes" : "No");
-  trajan::log::debug("Has 4D coords: {}", m_has_4d_coords ? "Yes" : "No");
-  trajan::log::debug("Delta: {}", delta);
-  trajan::log::debug("Fixed atoms (NAMNF): {}", namnf);
-
-  // Check for potential VMD memory allocation issues
-  if (namnf < 0 || namnf > static_cast<int32_t>(m_total_frames * 10000)) {
-    trajan::log::warn("WARNING: NAMNF value {} seems suspicious - this could "
-                      "cause VMD memory issues",
-                      namnf);
+  if (num_fixed_atoms < 0) {
+    trajan::log::warn("Negative fixed atoms count: {} - file may be corrupted",
+                      num_fixed_atoms);
+  }
+  if (num_fixed_atoms > 100000) {
+    trajan::log::warn(
+        "Unusually high fixed atoms count: {} - may indicate file corruption",
+        num_fixed_atoms);
+  }
+  if (m_total_frames == 0) {
+    trajan::log::warn(
+        "Header indicates zero frames - trajectory may be incomplete");
   }
   if (m_total_frames > 1000000) {
-    trajan::log::warn(
-        "WARNING: Frame count {} is very large - check if this is correct",
-        m_total_frames);
+    trajan::log::warn("Very large frame count: {} - ensure this is expected",
+                      m_total_frames);
+  }
+  if (save_frequency <= 0) {
+    trajan::log::warn("Invalid save frequency: {}", save_frequency);
   }
 
-  // Second record: Title information
   std::vector<char> title_buffer;
   if (!read_fortran_record(title_buffer)) {
     throw std::runtime_error("Failed to read DCD title record");
@@ -235,38 +237,64 @@ bool DCDHandler::_parse_dcd_header() {
 
   if (title_buffer.size() >= 4) {
     int32_t num_titles = *reinterpret_cast<int32_t *>(title_buffer.data());
-    trajan::log::debug("Number of titles: {}", num_titles);
-    trajan::log::debug("Title buffer size: {} bytes", title_buffer.size());
+    trajan::log::debug("Title record:");
+    trajan::log::debug("  Number of titles:    {}", num_titles);
+    trajan::log::debug("  Record size:         {} bytes", title_buffer.size());
+
+    if (num_titles > 0 && num_titles < 100) {
+      for (int i = 0;
+           i < num_titles && (4 + (i + 1) * 80) <= title_buffer.size(); ++i) {
+        std::string title(
+            title_buffer.data() + 4 + i * 80,
+            std::min(size_t(80), title_buffer.size() - (4 + i * 80)));
+        title.erase(title.find_last_not_of(" \0") + 1);
+        if (!title.empty()) {
+          trajan::log::debug("  Title[{}]:           '{}'", i, title);
+        }
+      }
+    }
 
     if (num_titles < 0 || num_titles > 1000) {
-      trajan::log::warn("WARNING: Suspicious title count: {}", num_titles);
+      trajan::log::warn("Suspicious title count: {}", num_titles);
     }
   }
 
-  // Third record: Number of atoms
   std::vector<char> atom_buffer;
+  // Allocate coordinate buffers
   if (!read_fortran_record(atom_buffer)) {
     throw std::runtime_error("Failed to read DCD atom count record");
   }
 
   if (atom_buffer.size() < 4) {
-    throw std::runtime_error("DCD atom count record too small");
+    throw std::runtime_error(fmt::format(
+        "DCD atom count record too small: {} bytes", atom_buffer.size()));
   }
 
   m_num_atoms =
       static_cast<size_t>(*reinterpret_cast<int32_t *>(atom_buffer.data()));
-  trajan::log::debug("Number of atoms: {}", m_num_atoms);
+  trajan::log::debug("System size:");
+  trajan::log::debug("  Number of atoms:     {}", m_num_atoms);
 
-  // Allocate coordinate buffers
+  if (m_num_atoms == 0) {
+    throw std::runtime_error("Zero atoms in system");
+  }
+  if (m_num_atoms > 10000000) {
+    trajan::log::warn("Very large system: {} atoms - ensure this is expected",
+                      m_num_atoms);
+  }
+
   m_x_coords.resize(m_num_atoms);
   m_y_coords.resize(m_num_atoms);
   m_z_coords.resize(m_num_atoms);
+
+  trajan::log::debug("Allocated coordinate buffers for {} atoms", m_num_atoms);
 
   return true;
 }
 
 bool DCDHandler::parse_dcd_header() {
   try {
+    trajan::log::debug("Attempting to parse DCD header:");
     bool success = this->_parse_dcd_header();
     if (success) {
       trajan::log::debug("Successfully parsed DCD header");
@@ -279,7 +307,6 @@ bool DCDHandler::parse_dcd_header() {
 }
 
 bool DCDHandler::_parse_dcd(core::Frame &frame) {
-  // Read CHARMM extra block (unit cell) if present
   if (m_is_charmm_format && m_has_extra_block) {
     std::vector<char> unitcell_buffer;
     if (!read_fortran_record(unitcell_buffer)) {
@@ -296,9 +323,10 @@ bool DCDHandler::_parse_dcd(core::Frame &frame) {
       double alpha = cell_data[4];
       double beta = cell_data[3];
       double gamma = cell_data[1];
-      trajan::log::debug(
-          "Raw DCD Unit Cell: {:8.6f} {:8.6f} {:8.6f} {:8.6f} {:8.6f} {:8.6f}",
-          a, b, c, alpha, beta, gamma);
+      trajan::log::trace("Unit cell (raw): a={:.4f} b={:.4f} c={:.4f}", a, b,
+                         c);
+      trajan::log::trace("Unit cell (raw): α={:.4f} β={:.4f} γ={:.4f}", alpha,
+                         beta, gamma);
       // Check if angles are stored as cosines (CHARMM/NAMD format)
       if (alpha >= -1.0 && alpha <= 1.0 && beta >= -1.0 && beta <= 1.0 &&
           gamma >= -1.0 && gamma <= 1.0) {
@@ -306,14 +334,28 @@ bool DCDHandler::_parse_dcd(core::Frame &frame) {
         alpha = std::acos(alpha);
         beta = std::acos(beta);
         gamma = std::acos(gamma);
+        trajan::log::trace(
+            "Unit cell angles interpreted as cosines, converted to radians");
       } else {
         alpha = occ::units::radians(alpha);
         beta = occ::units::radians(beta);
         gamma = occ::units::radians(gamma);
+        trajan::log::trace(
+            "Unit cell angles interpreted as degrees, converted to radians");
       }
+      using occ::units::degrees;
+      trajan::log::trace("Unit cell: a={:.4f} b={:.4f} c={:.4f} Angstroms", a,
+                         b, c);
+      trajan::log::trace("Unit cell: α={:.4f}({:.4f}) β={:.4f}({:.4f}) "
+                         "γ={:.4f}({:.4f}) rad(deg)",
+                         alpha, degrees(alpha), beta, degrees(beta), gamma,
+                         degrees(gamma));
       if (trajan::util::unitcell_is_reasonable(a, b, c, alpha, beta, gamma)) {
+        trajan::log::trace("Unit cell is reasonable");
         UnitCell uc = occ::crystal::triclinic_cell(a, b, c, alpha, beta, gamma);
         frame.set_unit_cell(uc);
+      } else {
+        trajan::log::trace("Unit cell is NOT reasonable. Not using it.");
       }
     }
   }
@@ -367,7 +409,12 @@ bool DCDHandler::_parse_dcd(core::Frame &frame) {
 
 bool DCDHandler::parse_dcd(Frame &frame) {
   try {
-    return this->_parse_dcd(frame);
+    trajan::log::trace("Parsing next DCD frame");
+    auto success = this->_parse_dcd(frame);
+    if (success) {
+      trajan::log::trace("Successfully parsed DCD frame");
+    }
+    return success;
   } catch (const std::exception &e) {
     throw std::runtime_error(
         fmt::format("Exception while parsing DCD frame: {}", e.what()));

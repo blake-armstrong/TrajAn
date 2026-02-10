@@ -1,8 +1,8 @@
 #pragma once
 
+#include "spdlog/common.h"
 #include <algorithm>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <trajan/core/atom.h>
 #include <trajan/core/log.h>
@@ -20,10 +20,15 @@ using Molecule = trajan::core::Molecule;
 struct SelectionBase {
   virtual std::string name() const = 0;
   virtual ~SelectionBase() = default;
+  std::string raw_input() const { return m_raw_input; }
+  std::string m_raw_input{};
 };
 
 template <typename T> struct Selection : public SelectionBase {
-  Selection(std::vector<T> d) { data = std::move(d); }
+  Selection(std::vector<T> d, const std::string &raw_input) {
+    data = std::move(d);
+    m_raw_input = raw_input;
+  }
   std::vector<T> data;
 
   auto begin() { return data.begin(); }
@@ -147,103 +152,19 @@ private:
   }
 };
 
-template <typename SelectionType>
-std::vector<core::EntityVariant>
-process_selection(const SelectionCriteria &selection,
-                  const std::vector<Atom> &atoms,
-                  const std::vector<Molecule> &molecules,
-                  std::vector<core::EntityVariant> &entities) {
+void process_selection(const SelectionCriteria &selection,
+                       const std::vector<Atom> &atoms,
+                       const std::vector<Molecule> &molecules,
+                       std::vector<core::EntityVariant> &entities);
 
-  std::visit(
-      [&](const auto &sel) {
-        using SelType = std::decay_t<decltype(sel)>;
-        trajan::log::debug("Processing selection of type {}", sel.name());
+void process_selection(const std::vector<SelectionCriteria> &selections,
+                       const std::vector<Atom> &atoms,
+                       const std::vector<Molecule> &molecules,
+                       std::vector<core::EntityVariant> &entities);
 
-        if constexpr (std::is_same_v<SelType, io::AtomIndexSelection>) {
-          for (const Atom &atom : atoms) {
-            for (const int &ai : sel) {
-              if (atom.index == ai) {
-                entities.push_back(atom);
-              }
-            }
-          }
-        } else if constexpr (std::is_same_v<SelType, io::AtomTypeSelection>) {
-          for (const Atom &atom : atoms) {
-            for (const std::string &at : sel) {
-              if (atom.type == at) {
-                entities.push_back(atom);
-              }
-            }
-          }
-        } else if constexpr (std::is_same_v<SelType,
-                                            io::MoleculeIndexSelection>) {
-          for (const Molecule &molecule : molecules) {
-            for (const int &mi : sel) {
-              if (molecule.index == mi) {
-                entities.push_back(molecule);
-              }
-            }
-          }
-        } else if constexpr (std::is_same_v<SelType,
-                                            io::MoleculeTypeSelection>) {
-          for (const Molecule &molecule : molecules) {
-            for (const std::string &mt : sel) {
-              if (molecule.type == mt) {
-                entities.push_back(molecule);
-              }
-            }
-          }
-        }
-      },
-      selection);
-  return entities;
-};
-
-template <typename SelectionType>
-std::vector<core::EntityVariant>
-process_selection(const std::vector<SelectionCriteria> &selections,
-                  const std::vector<Atom> &atoms,
-                  const std::vector<Molecule> &molecules,
-                  std::vector<core::EntityVariant> &entities) {
-
-  for (const auto &selection : selections) {
-    process_selection<SelectionType>(selection, atoms, molecules, entities);
-  }
-
-  // Remove duplicates based on entity type and index
-  std::sort(entities.begin(), entities.end(), [](const auto &a, const auto &b) {
-    auto get_sort_key = [](const auto &entity) {
-      return std::visit(
-          [](const auto &e) {
-            return std::make_pair(typeid(e).hash_code(), e.index);
-          },
-          entity);
-    };
-    return get_sort_key(a) < get_sort_key(b);
-  });
-
-  entities.erase(
-      std::unique(entities.begin(), entities.end(),
-                  [](const auto &a, const auto &b) {
-                    auto is_same_type_and_index = [](const auto &a_entity,
-                                                     const auto &b_entity) {
-                      return std::visit(
-                          [&](const auto &a_val, const auto &b_val) {
-                            using TypeA = std::decay_t<decltype(a_val)>;
-                            using TypeB = std::decay_t<decltype(b_val)>;
-                            if constexpr (std::is_same_v<TypeA, TypeB>) {
-                              return a_val.index == b_val.index;
-                            }
-                            return false;
-                          },
-                          a_entity, b_entity);
-                    };
-                    return is_same_type_and_index(a, b);
-                  }),
-      entities.end());
-
-  return entities;
-}
+void update_entities_with_positions(std::vector<core::EntityVariant> &entities,
+                                    const std::vector<Atom> &atoms,
+                                    const std::vector<Molecule> &molecules);
 
 void print_parsed_selection(const std::vector<SelectionCriteria> &result);
 

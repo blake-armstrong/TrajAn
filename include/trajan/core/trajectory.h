@@ -67,22 +67,24 @@ public:
     return m_frame.unit_cell();
   }
 
-  const std::vector<EntityVariant>
+  inline bool topology_has_changed() const { return m_topology_has_changed; }
+
+  std::vector<EntityVariant>
   get_entities(const io::SelectionCriteria &selection);
-  const std::vector<EntityVariant>
+  std::vector<EntityVariant>
   get_entities(const std::vector<io::SelectionCriteria> &selections);
+  void update_entities(std::vector<EntityVariant> &entities);
   inline const std::vector<Atom> &atoms() const { return m_frame.atoms(); }
   inline const std::vector<Atom> &get_atoms() const { return m_frame.atoms(); }
-  const std::vector<Atom> get_atoms(const io::SelectionCriteria &selection);
-  const std::vector<Atom>
+  std::vector<Atom> get_atoms(const io::SelectionCriteria &selection);
+  std::vector<Atom>
   get_atoms(const std::vector<io::SelectionCriteria> &selections);
-  const std::vector<Molecule> get_molecules();
-  const std::vector<Molecule>
-  get_molecules(const io::SelectionCriteria &selection);
-  const std::vector<Molecule>
+  std::vector<Molecule> get_molecules();
+  std::vector<Molecule> get_molecules(const io::SelectionCriteria &selection);
+  std::vector<Molecule>
   get_molecules(const std::vector<io::SelectionCriteria> &selections);
 
-  const Topology &get_topology(
+  Topology &get_topology(
       const std::optional<TopologyUpdateSettings> &settings = std::nullopt);
   void update_topology(
       const std::optional<TopologyUpdateSettings> &settings = std::nullopt);
@@ -92,7 +94,6 @@ public:
 private:
   bool _next_frame();
   bool m_guess_connectivity{true};
-
   std::vector<fs::path> m_files{};
   size_t m_current_handler_index{0};
   size_t m_current_frame_index{0};
@@ -104,10 +105,10 @@ private:
   bool m_frames_in_memory{false};
   bool next_topology_update();
   TopologyUpdateSettings m_topology_settings;
-
-  mutable Topology m_topology;
-  mutable std::vector<Molecule> m_molecules{};
-  mutable bool m_topology_needs_update{true};
+  Topology m_topology;
+  std::vector<Molecule> m_molecules{};
+  bool m_topology_needs_update{true};
+  bool m_topology_has_changed{true};
 };
 
 }; // namespace trajan::core
