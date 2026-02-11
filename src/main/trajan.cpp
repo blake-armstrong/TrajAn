@@ -44,7 +44,7 @@ int main(int argc, char *argv[]) {
   trajan::main::print_header();
 
   // used to ensure we have a subcommand
-  app.require_subcommand(/* min */ 0, /* max */ 0);
+  app.require_subcommand(/* min */ 1, /* max */ 0);
 
   constexpr auto *error_format = "exception:\n    {}\nterminating program.\n ";
   try {

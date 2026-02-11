@@ -1,4 +1,5 @@
 #pragma once
+#include "trajan/core/topology.h"
 #include <occ/core/linear_algebra.h>
 #include <occ/crystal/unitcell.h>
 #include <optional>
@@ -23,6 +24,7 @@ public:
   void set_unit_cell(const UnitCell &unit_cell);
 
   inline const std::vector<Atom> &atoms() const { return m_atoms; }
+  inline std::vector<Atom> &atoms() { return m_atoms; }
   void set_atoms(const std::vector<Atom> &atoms);
   inline size_t num_atoms() const { return m_num_atoms; }
 
@@ -48,6 +50,10 @@ public:
   inline void set_multiplicity(int mult) { m_multiplicity = mult; }
   inline const double &get_charge() const { return m_charge; }
   inline const int &get_multiplicity() const { return m_multiplicity; }
+  inline void set_atom_graph(const AtomGraph &atom_graph) {
+    m_atom_graph = atom_graph;
+  }
+  inline const AtomGraph &get_atom_graph() const { return m_atom_graph; }
 
   Frame() = default;
 
@@ -72,6 +78,7 @@ private:
   double m_timestep;
   double m_charge = 0.0;
   int m_multiplicity = 1;
+  AtomGraph m_atom_graph;
 
   void update_positions();
 };

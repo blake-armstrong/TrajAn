@@ -9,6 +9,7 @@ constexpr std::string_view PDB_CRYST_FMT_READ =
 constexpr std::string_view PDB_LINE_FMT_READ =
     // AAAAAABBBBBXCCCCDEEEXFGGGGHXXXIIIIIIIIJJJJJJJJKKKKKKKKLLLLLLMMMMMMXXXXXXXXXXNNOO
     "%6c%5d%1c%4c%1c%3c%1c%1c%4d%1c%3c%8lf%8lf%8lf%6f%6f%10c%2c%2c";
+constexpr std::string_view PDB_CONECT_FMT_READ = "%6c%5d%5d%5d%5d%5d";
 
 constexpr std::string_view PDB_LINE_FMT_WRITE =
     "{:<6}{:>5}{:1}{:>4}{:1}{:>3}{:1}{:1}{:>4}{:1}{:>3}{:8.3f}{:8.3f}{:8.3f}{:"

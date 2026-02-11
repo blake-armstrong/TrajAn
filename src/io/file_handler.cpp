@@ -28,15 +28,16 @@ bool FileHandler::initialise(Mode mode) {
   if (m_initialised) {
     return true;
   }
-  trajan::log::debug(fmt::format("Initialising file '{}'", this->file_name()));
+  trajan::log::debug("Initialising file: ");
+  trajan::log::debug("  '{}'", this->file_name());
   m_initialised = this->_initialise();
   if (!m_initialised) {
     throw std::runtime_error(fmt::format(
         "Unable to open file for {}: '{}'",
         (mode == Mode::Read) ? "reading" : "writing", this->file_name()));
   }
-  trajan::log::debug(
-      fmt::format("Successfully initialised file '{}'", this->file_name()));
+  trajan::log::debug("Successfully initialised file: ");
+  trajan::log::debug("  '{}'", this->file_name());
   return m_initialised;
 }
 

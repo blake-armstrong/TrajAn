@@ -264,7 +264,6 @@ void Trajectory::update_topology(
 
   trajan::log::trace("Creating atom graph inside update_topology");
   AtomGraph atom_graph;
-  std::vector<AtomGraph::VertexDescriptor> atom_graph_vertices;
   for (int i = 0; i < atoms.size(); i++) {
     atom_graph.add_vertex(trajan::core::AtomVertex{i});
   }

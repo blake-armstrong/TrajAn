@@ -17,14 +17,14 @@ void print_header() {
   const std::string spdlog_version_string = fmt::format(
       "{}.{}.{}", SPDLOG_VER_MAJOR, SPDLOG_VER_MINOR, SPDLOG_VER_PATCH);
 
-  trajan::log::info("{}", std::string(trajan::log::LINE_WIDTH, '-'));
+  // trajan::log::info("{}", std::string(trajan::log::LINE_WIDTH, '-'));
   trajan::log::info(R"(
   
 TRAJAN
 
 a program for molecular dynamics analysis.
 
-copyright (C) 2024 -> Blake Armstrong
+copyright (C) 2024 -> Blake I. Armstrong
 
 this version of trajan makes use of the following third party libraries:
 
@@ -36,6 +36,6 @@ this version of trajan makes use of the following third party libraries:
 )",
                     eigen_version_string, fmt_version_string,
                     spdlog_version_string);
-  trajan::log::info("{}", std::string(trajan::log::LINE_WIDTH, '-'));
+  // trajan::log::info("{}", std::string(trajan::log::LINE_WIDTH, '-'));
 }
 } // namespace trajan::main

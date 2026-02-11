@@ -27,6 +27,9 @@ void Frame::set_unit_cell(const UnitCell &unit_cell) {
 }
 
 const Mat3N Frame::cart_pos(std::optional<double> scale) const {
+  if (m_num_atoms != m_atoms.size()) {
+    trajan::log::warn("Number of atoms and atoms size in frame out of sync.");
+  }
   Mat3N cart_pos(3, m_num_atoms);
   if (scale.has_value()) {
     const double scale_val = scale.value();
@@ -48,6 +51,9 @@ const Mat3N Frame::cart_pos(std::optional<double> scale) const {
 }
 
 const occ::Vec Frame::cart_pos_flat(std::optional<double> scale) const {
+  if (m_num_atoms != m_atoms.size()) {
+    trajan::log::warn("Number of atoms and atoms size in frame out of sync.");
+  }
   occ::Vec cart_pos(m_num_atoms * 3);
   if (scale.has_value()) {
     const double scale_val = scale.value();
