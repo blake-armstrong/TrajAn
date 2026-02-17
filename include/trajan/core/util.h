@@ -278,4 +278,30 @@ std::string format_vector(const std::vector<T> &vec, size_t max_width = 80) {
   return oss.str();
 }
 
+template <typename T> bool all_same(const std::vector<T> &v) {
+  return std::adjacent_find(v.begin(), v.end(), std::not_equal_to<>()) ==
+         v.end();
+}
+
+inline double angle_between(const Vec3 &a, const Vec3 &b) {
+  return std::acos(std::clamp(a.normalized().dot(b.normalized()), -1.0, 1.0));
+}
+inline double dihedral_between(const Vec3 &b1, const Vec3 &b2, const Vec3 &b3) {
+  Vec3 normal1 = b1.cross(b2);
+  Vec3 normal2 = b2.cross(b3);
+
+  double y = b2.normalized().dot(normal1.cross(normal2));
+  double x = normal1.dot(normal2);
+  return std::atan2(y, x);
+}
+
+inline double out_of_plane_distance(const Vec3 &b_ij, const Vec3 &b_ik,
+                                    const Vec3 &b_il) {
+  Vec3 b_jk = b_ik - b_ij;
+  Vec3 b_jl = b_il - b_ij;
+
+  Vec3 normal = b_jk.cross(b_jl).normalized();
+  return std::abs(-b_ij.dot(normal));
+}
+
 } // namespace trajan::util

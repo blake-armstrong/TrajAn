@@ -25,10 +25,11 @@ struct BondCutoff {
 
 struct TopologyUpdateSettings {
   bool compute_topology{false};
+  bool use_input_topology{true};
   bool top_auto{true};
   int update_frequency{0};
   std::vector<BondCutoff> bond_cutoffs{};
-  std::vector<int> no_bonds{};
+  std::vector<io::SelectionCriteria> no_bonds{};
   double bond_tolerance{0.4};
 };
 

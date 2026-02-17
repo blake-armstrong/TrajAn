@@ -12,9 +12,8 @@ using Atom = trajan::core::EnhancedAtom;
 
 class EnhancedMolecule : public occ::core::Molecule {
 public:
-  std::string type;
-  int index;
-  std::optional<int> uindex;
+  std::string type, utype{"UNK"};
+  int index, uindex{0}, subindex;
   std::vector<Atom> enhanced_atoms;
 
   inline bool operator==(const EnhancedMolecule &rhs) const {

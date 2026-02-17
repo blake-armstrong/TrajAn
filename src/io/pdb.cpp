@@ -50,7 +50,6 @@ void PDBHandler::_finalise() {
 bool PDBHandler::parse_pdb(Frame &frame) {
   trajan::log::trace("Attempting to parse PDB file");
   std::vector<core::Atom> &atoms = frame.atoms();
-  // std::vector<core::Atom> atoms;
   atoms.clear();
   bool atoms_set{false};
   core::AtomGraph atom_graph;
@@ -114,7 +113,7 @@ bool PDBHandler::parse_pdb(Frame &frame) {
       atom.molecule_type = res_name;
       occ::util::trim(atom.molecule_type);
       atom.umolecule_index = res_seq;
-
+      atom.molecule_index = 0;
       atoms.push_back(atom);
       atoms_set = false;
       trajan::log::trace("{}: Creating atom: {}", record_name, atom.repr());
@@ -160,6 +159,21 @@ bool PDBHandler::parse_pdb(Frame &frame) {
             "CONECT: Creating bond between atom indices {:>5} {:>5}: "
             "{:>8.4f} Angstroms",
             a_main, aj, bond.bond_length);
+        if (atoms[a_main].molecule_type != atoms[aj].molecule_type) {
+          trajan::log::warn(
+              "  atoms {:>5} {:>5} are bonded according to CONECT but not of "
+              "the same residue type({} and {}) !",
+              a_main, aj, atoms[a_main].molecule_type, atoms[aj].molecule_type);
+        }
+        if (atoms[a_main].molecule_type == atoms[aj].molecule_type) {
+          if (atoms[a_main].molecule_index != atoms[aj].molecule_index) {
+            trajan::log::warn(
+                "  atoms {:>5} {:>5} are bonded according to CONECT but do not "
+                "have the same residue index({} and {} of residue type{})!",
+                a_main, aj, atoms[a_main].molecule_index,
+                atoms[aj].molecule_index, atoms[a_main].molecule_type);
+          }
+        }
       }
       continue;
     }
@@ -168,7 +182,12 @@ bool PDBHandler::parse_pdb(Frame &frame) {
   if (!atoms_set) {
     frame.set_atoms(atoms);
   }
+  // TODO: process atom graph and input residue names/indicies and check
+  // agreement with the info from atom_graph.
   frame.set_atom_graph(atom_graph);
+  if (atom_graph.num_edges() > 0) {
+    frame.set_topology(core::Topology(atoms, atom_graph));
+  }
   trajan::log::trace("Found {} atoms in PDB file", atoms.size());
   trajan::log::trace("Successfully parsed PDB file");
   return true;

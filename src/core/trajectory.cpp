@@ -79,7 +79,6 @@ bool Trajectory::_next_frame() {
     }
     m_frame = m_frames[m_current_frame_index];
     m_frame_loaded = true;
-    m_current_frame_index++;
     return true;
   }
 
@@ -97,7 +96,6 @@ bool Trajectory::_next_frame() {
       if (m_handlers[m_current_handler_index]->read_frame(m_frame)) {
         m_frame_loaded = true;
         m_frame.set_index(m_current_frame_index);
-        m_current_frame_index++;
         return true;
       }
     }
@@ -110,13 +108,19 @@ bool Trajectory::_next_frame() {
 }
 
 bool Trajectory::next_frame() {
+  trajan::log::debug("Current frame index {}", m_current_frame_index);
   bool next = this->_next_frame();
   bool update_top = this->next_topology_update();
   if (update_top) {
+    trajan::log::debug("Updating topology on frame {}", m_current_frame_index);
     this->update_topology(m_topology_settings);
   } else {
+    if (m_topology_settings.use_input_topology) {
+      m_topology = this->get_topology(m_topology_settings);
+    }
     m_topology_has_changed = false;
   }
+  m_current_frame_index++;
   if (next) {
     return next;
   }
@@ -129,18 +133,25 @@ bool Trajectory::next_frame() {
 }
 
 bool Trajectory::next_topology_update() {
+  if (m_topology_settings.use_input_topology) {
+    trajan::log::debug("Not updating topology as use_input_topology is True.");
+    return false;
+  }
   if (!m_topology_settings.compute_topology) {
+    trajan::log::debug("Not updating topology as compute_topology is False.");
     return false;
   }
   if (m_topology_settings.update_frequency == 0) {
-    if (m_current_frame_index > 1) {
+    if (m_current_frame_index > 0) {
+      trajan::log::debug("Not updating topology due to update_frequency");
       return false;
     }
   }
-  if (!((m_current_frame_index - 1) % m_topology_settings.update_frequency ==
-        0)) {
+  if (!((m_current_frame_index) % m_topology_settings.update_frequency == 0)) {
+    trajan::log::debug("Not updating topology due to update_frequency");
     return false;
   }
+  trajan::log::debug("Updating topology on frame {}", m_current_frame_index);
   return true;
 }
 
@@ -174,6 +185,7 @@ void Trajectory::set_topology_settings(const TopologyUpdateSettings &settings) {
   trajan::log::debug("Settings for topology have been updated: ");
   trajan::log::debug("  compute_topology: {}", settings.compute_topology);
   trajan::log::debug("  top_auto: {}", settings.top_auto);
+  trajan::log::debug("  from_file: {}", settings.use_input_topology);
   trajan::log::debug("  update_frequency: {} frames",
                      settings.update_frequency);
   trajan::log::debug("  bond_tolerance: {} Angstroms", settings.bond_tolerance);
@@ -240,8 +252,22 @@ std::vector<Molecule> Trajectory::get_molecules(
 
 Topology &Trajectory::get_topology(
     const std::optional<TopologyUpdateSettings> &opt_settings) {
-  if (m_topology_needs_update || this->next_topology_update()) {
-    this->update_topology(opt_settings);
+  auto final_settings = opt_settings.value_or(m_topology_settings);
+  if (m_topology_needs_update) {
+    if (final_settings.use_input_topology) {
+      const auto &f = this->frame();
+      if (f.get_atom_graph().num_edges() > 0) {
+        m_topology = f.get_topology();
+        trajan::log::debug(
+            "Using topology specified from input file (e.g., PDB CONECT)");
+        m_topology_needs_update = false;
+        return m_topology;
+      } else {
+        trajan::log::debug("No input topology to use.");
+        return m_topology;
+      }
+    }
+    this->update_topology(final_settings);
   }
   return m_topology;
 }
@@ -257,17 +283,15 @@ void Trajectory::update_topology(
     return;
   }
 
-  TopologyUpdateSettings default_settings;
-  default_settings.bond_tolerance = occ::core::get_bond_tolerance();
-
-  auto final_settings = opt_settings.value_or(default_settings);
+  auto final_settings = opt_settings.value_or(m_topology_settings);
 
   trajan::log::trace("Creating atom graph inside update_topology");
   AtomGraph atom_graph;
   for (int i = 0; i < atoms.size(); i++) {
     atom_graph.add_vertex(trajan::core::AtomVertex{i});
   }
-  trajan::log::trace("Atom graph created");
+  trajan::log::trace("Atom graph created with {} vertices",
+                     atom_graph.num_vertices());
   double max_cov_radii = occ::core::max_covalent_radius();
   trajan::log::debug("Maximum covalent radius: {:.4f} Angstroms",
                      max_cov_radii);
@@ -291,21 +315,33 @@ void Trajectory::update_topology(
 
   size_t bond_count = 0;
 
+  std::vector<Atom> nbatoms = this->get_atoms(final_settings.no_bonds);
+  std::vector<int> no_bond_ints;
+  no_bond_ints.reserve(nbatoms.size());
+  for (const auto &a : nbatoms) {
+    no_bond_ints.push_back(a.index);
+  }
+  std::sort(no_bond_ints.begin(), no_bond_ints.end());
+
   NeighbourCallback func = [&](const Entity &ent1, const Entity &ent2,
                                double rsq) {
     const Atom &atom1 = atoms[ent1.index];
     const Atom &atom2 = atoms[ent2.index];
-    if (std::binary_search(final_settings.no_bonds.begin(),
-                           final_settings.no_bonds.end(), atom1.index) ||
-        std::binary_search(final_settings.no_bonds.begin(),
-                           final_settings.no_bonds.end(), atom2.index)) {
-      trajan::log::debug("Atom pair {} {} skipped due to --no-bond flag",
-                         atom1.index, atom2.index); // TODO: elaborate output
+    if (std::binary_search(no_bond_ints.begin(), no_bond_ints.end(),
+                           atom1.index) ||
+        std::binary_search(no_bond_ints.begin(), no_bond_ints.end(),
+                           atom2.index)) {
+      trajan::log::trace(
+          "Atom pair {}({}) {}({}) d={:.2f} skipped due to --no-bond flag",
+          atom1.index, atom1.type, atom2.index, atom2.type,
+          std::sqrt(rsq)); // TODO: elaborate output
       return;
     }
     std::optional<Bond> bond =
         atom1.is_bonded_with_rsq(atom2, rsq, final_settings.bond_tolerance);
     if (!bond.has_value()) {
+      trajan::log::trace("Atom pair {}({}) {}({}) skipped", atom1.index,
+                         atom1.type, atom2.index, atom2.type);
       return;
     }
     for (const auto &bc : final_settings.bond_cutoffs) {
@@ -319,17 +355,19 @@ void Trajectory::update_topology(
       switch (bc.op) {
       case BondCutoff::ComparisonOp::LessThan:
         if (rsq > bc_cutoffsq) {
-          trajan::log::debug("Atom pair {} and {} with distance {:.3f} skipped "
+          trajan::log::trace("Atom pair {}({}) {}({}) d={:.2f} skipped "
                              "due to --bond-critera.",
-                             atom1.index, atom2.index, std::sqrt(rsq));
+                             atom1.index, atom1.type, atom2.index, atom2.type,
+                             std::sqrt(rsq));
           return;
         }
         break;
       case BondCutoff::ComparisonOp::GreaterThan:
         if (rsq < bc_cutoffsq) {
-          trajan::log::debug("Atom pair {} and {} with distance {:.3f} skipped "
+          trajan::log::trace("Atom pair {}({}) {}({}) d={:.2f} skipped "
                              "due to --bond-critera.",
-                             atom1.index, atom2.index, std::sqrt(rsq));
+                             atom1.index, atom1.type, atom2.index, atom2.type,
+                             std::sqrt(rsq));
           return;
         }
         break;
@@ -341,6 +379,8 @@ void Trajectory::update_topology(
     Bond bv = bond.value();
     bv.indices = {ent1.index, ent2.index};
     atom_graph.add_edge(ent1.index, ent2.index, bv, true);
+    trajan::log::trace("Bond added: {}({}) {}({}) d={:.2f}", atom1.index,
+                       atom1.type, atom2.index, atom2.type, bv.bond_length);
     bond_count++;
   };
 
@@ -357,7 +397,11 @@ std::vector<Molecule> Trajectory::get_molecules() {
   if (m_topology_needs_update) {
     this->update_topology();
   }
-  return m_topology.extract_molecules();
+  // const auto &molecules = m_topology.extract_molecules();
+  // auto &atoms = this->atoms();
+  // for (const auto &m : molecules) {
+  // }
+  return m_topology.get_molecules();
 }
 
 } // namespace trajan::core

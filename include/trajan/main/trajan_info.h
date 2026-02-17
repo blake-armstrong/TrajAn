@@ -8,8 +8,7 @@ namespace trajan::main {
 using trajan::core::Trajectory;
 
 struct InfoOpts {
-  bool density{true};
-  bool cell{true};
+  bool detailed_top{false};
   bool timings{true};
 };
 

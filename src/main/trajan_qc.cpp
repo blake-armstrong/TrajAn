@@ -2,7 +2,9 @@
 
 namespace trajan::main {
 
-void run_qc_subcommand(QCOpts const &opts, Trajectory &traj);
+void run_qc_subcommand(QCOpts const &opts, Trajectory &traj) {
+
+};
 
 CLI::App *add_qc_subcommand(CLI::App &app, Trajectory &traj) {
   CLI::App *qc =

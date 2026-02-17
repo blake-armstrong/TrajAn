@@ -1,3 +1,6 @@
+#include "occ/core/units.h"
+#include "trajan/core/frame.h"
+#include "trajan/core/util.h"
 #include <Eigen/Geometry>
 #include <trajan/core/atomgraph.h>
 #include <trajan/core/topology.h>
@@ -294,6 +297,7 @@ void Topology::generate_all_from_bonds() {
   this->generate_angles_from_bonds();
   this->generate_proper_dihedrals_from_bonds();
   this->generate_improper_dihedrals_from_bonds();
+  this->generate_molecules();
 }
 
 std::vector<size_t> Topology::get_bonded_atoms(size_t atom_idx) const {
@@ -358,7 +362,7 @@ std::vector<size_t> Topology::get_atoms_at_distance(size_t atom_idx,
   return std::vector<size_t>(final_level.begin(), final_level.end());
 }
 
-std::vector<Molecule> Topology::extract_molecules() const {
+void Topology::generate_molecules() {
 
   auto components = m_atom_graph.connected_components();
   ankerl::unordered_dense::map<size_t, std::vector<AtomGraph::VertexDescriptor>>
@@ -366,17 +370,53 @@ std::vector<Molecule> Topology::extract_molecules() const {
   for (const auto &[vertex, component_id] : components) {
     grouped[component_id].push_back(vertex);
   }
-  std::vector<Molecule> molecules{};
+  m_molecules.clear();
+  m_atom_to_molecule.clear();
+  using ankerl::unordered_dense::map;
+  map<std::string, size_t> molecule_counts;
+  size_t unique_molecule_counter{0};
   for (const auto &[component_id, vertices] : grouped) {
     std::vector<Atom> atoms;
+    std::vector<std::string> residue_name;
+    std::vector<size_t> residue_index;
     for (const auto vertex : vertices) {
-      atoms.push_back(m_atoms[vertex]);
+      const auto &a = m_atoms[vertex];
+      atoms.push_back(a);
+      residue_name.push_back(a.molecule_type);
+      residue_index.push_back(a.umolecule_index);
+    }
+    bool same_res_name = trajan::util::all_same(residue_name);
+    if (!same_res_name) {
+      trajan::log::warn("not all atoms have the same residue type in molecule "
+                        "extracted from topology:\n {}",
+                        trajan::util::format_vector(residue_name));
+    }
+    if (!trajan::util::all_same(residue_index) && same_res_name) {
+      trajan::log::warn(
+          "not all atoms have the same residue index in same "
+          "residue name ({}) in molecule extracted from topology:\n {}",
+          residue_name[0], trajan::util::format_vector(residue_name));
     }
     Molecule molecule(atoms);
-    molecules.emplace_back(atoms);
+    molecule.index = m_molecules.size();
+    molecule.uindex = residue_index[0];
+    molecule.utype = residue_name[0];
+    molecule.type = fmt::format("M{}", unique_molecule_counter + 1);
+    for (const auto &m : m_molecules) {
+      if (molecule.is_comparable_to(m)) {
+        molecule.type = m.type;
+        break;
+      }
+      unique_molecule_counter++;
+      molecule.type = fmt::format("M{}", unique_molecule_counter + 1);
+    }
+    molecule_counts[molecule.type]++;
+    molecule.subindex = molecule_counts[molecule.type];
+    m_molecules.emplace_back(atoms);
+    for (const auto &a : atoms) {
+      m_atom_to_molecule[a.index] = molecule.index;
+    }
   }
-
-  return molecules;
 }
 
 size_t Topology::num_proper_dihedrals() const {
@@ -459,44 +499,6 @@ Topology::find_improper_dihedrals_around_atom(size_t centre_atom) const {
   return impropers;
 }
 
-double Topology::calculate_angle(const Vec3 &pos1, const Vec3 &pos_center,
-                                 const Vec3 &pos3) {
-  Vec3 vec1 = pos1 - pos_center;
-  Vec3 vec3 = pos3 - pos_center;
-
-  double dot_product = vec1.dot(vec3);
-  double magnitude_product = vec1.norm() * vec3.norm();
-
-  if (magnitude_product == 0.0)
-    return 0.0;
-
-  double cos_angle = dot_product / magnitude_product;
-  cos_angle = std::clamp(cos_angle, -1.0, 1.0);
-
-  return std::acos(cos_angle);
-}
-
-double Topology::calculate_dihedral(const Vec3 &pos1, const Vec3 &pos2,
-                                    const Vec3 &pos3, const Vec3 &pos4) {
-  Vec3 vec12 = pos2 - pos1;
-  Vec3 vec23 = pos3 - pos2;
-  Vec3 vec34 = pos4 - pos3;
-
-  Vec3 normal1 = vec12.cross(vec23);
-  Vec3 normal2 = vec23.cross(vec34);
-
-  double dot_product = normal1.dot(normal2);
-  double magnitude_product = normal1.norm() * normal2.norm();
-
-  if (magnitude_product == 0.0)
-    return 0.0;
-
-  double cos_angle = dot_product / magnitude_product;
-  cos_angle = std::clamp(cos_angle, -1.0, 1.0);
-
-  return std::acos(cos_angle);
-}
-
 bool Topology::validate_topology() const { return check_issues().empty(); }
 
 std::vector<std::string> Topology::check_issues() const {
@@ -526,12 +528,110 @@ std::vector<std::string> Topology::check_issues() const {
 }
 
 void Topology::print_summary() const {
-  trajan::log::info("Topology Summary:\n");
-  trajan::log::info("  Bonds: {}\n", this->num_bonds());
-  trajan::log::info("  Angles: {}\n", this->num_angles());
-  trajan::log::info("  Proper Dihedrals: {}\n", this->num_proper_dihedrals());
-  trajan::log::info("  Improper Dihedrals: {}\n",
+  size_t width = 20;
+  trajan::log::info("Topology summary:");
+  trajan::log::info("  {:>{}}: {:>10}", "atoms", width, this->num_atoms());
+  trajan::log::info("  {:>{}}: {:>10}", "bonds", width, this->num_bonds());
+  trajan::log::info("  {:>{}}: {:>10}", "angles", width, this->num_angles());
+  trajan::log::info("  {:>{}}: {:>10}", "proper dihedrals", width,
+                    this->num_proper_dihedrals());
+  trajan::log::info("  {:>{}}: {:>10}", "improper dihedrals", width,
                     this->num_improper_dihedrals());
+}
+
+void Topology::print_detailed() const {
+  trajan::log::info("Atoms:");
+  trajan::log::info("  {:>8}  molecule-type(input) molecule-index(input)", "i");
+  for (size_t i = 0; i < m_atoms.size(); i++) {
+    const auto &atom = m_atoms[i];
+    trajan::log::info("  {:>8d} {:<6s} {:>6}", i, atom.molecule_type,
+                      atom.umolecule_index);
+  }
+
+  trajan::log::info("Bonds:");
+  trajan::log::info("  {:>8} {:>8} length(Angstroms)", "i", "j");
+  for (const auto &[bond_pair, bond] : m_bond_storage) {
+    trajan::log::info("  {:>8d} {:>8d} {:>.4f} ", bond_pair.first,
+                      bond_pair.second, bond.bond_length);
+  }
+
+  trajan::log::info("Angles:");
+  trajan::log::info("  {:>8} {:>8} {:>8} theta(degrees)", "i", "j", "k");
+  for (const auto &angle : m_angles) {
+    trajan::log::info("  {:>8d} {:>8d} {:>8d} {:>.4f}", angle.atom1(),
+                      angle.center_atom(), angle.atom3(),
+                      occ::units::degrees(angle.theta));
+  }
+
+  trajan::log::info("Proper dihedrals:");
+  trajan::log::info("  {:>8} {:>8} {:>8} {:>8} phi(degreees)", "i", "j", "k",
+                    "l");
+  for (const auto &dihedral : m_dihedrals) {
+    switch (dihedral.type) {
+    case DihedralType::PROPER:
+
+      trajan::log::info("  {:>8d} {:>8d} {:>8d} {:>8d} {:>.4f} ",
+                        dihedral.atom_indices[0], dihedral.atom_indices[1],
+                        dihedral.atom_indices[2], dihedral.atom_indices[3],
+                        occ::units::degrees(dihedral.phi));
+      break;
+    case DihedralType::IMPROPER:
+      break;
+    }
+  }
+  trajan::log::info("Improper dihedrals:");
+  trajan::log::info(
+      "  {:>8} {:>8} {:>8} {:>8} out-of-plane-distance(Angstroms)", "i", "j",
+      "k", "l");
+  for (const auto &dihedral : m_dihedrals) {
+    switch (dihedral.type) {
+    case DihedralType::PROPER:
+      break;
+    case DihedralType::IMPROPER:
+      trajan::log::info("  {:>8d} {:>8d} {:>8d} {:>8d} {:>.4f} ",
+                        dihedral.atom_indices[0], dihedral.atom_indices[1],
+                        dihedral.atom_indices[2], dihedral.atom_indices[3],
+                        dihedral.distance);
+      break;
+    }
+  }
+
+  trajan::log::info("Per-atom connectivity:");
+  for (size_t i = 0; i < m_atoms.size(); i++) {
+    auto bonded = get_bonded_atoms(i);
+
+    size_t angle_count =
+        std::count_if(m_angles.begin(), m_angles.end(), [i](const Angle &a) {
+          return a.atom1() == i || a.center_atom() == i || a.atom3() == i;
+        });
+    size_t dihedral_count = std::count_if(
+        m_dihedrals.begin(), m_dihedrals.end(), [i](const Dihedral &d) {
+          return d.atom_indices[0] == i || d.atom_indices[1] == i ||
+                 d.atom_indices[2] == i || d.atom_indices[3] == i;
+        });
+
+    std::string bonded_str;
+    for (size_t j = 0; j < bonded.size(); j++) {
+      bonded_str += std::to_string(bonded[j]);
+      if (j + 1 < bonded.size())
+        bonded_str += ", ";
+    }
+
+    trajan::log::info("  {:>8d}  bonds: {:<2d}  angles: {:<3d}  dihedrals: "
+                      "{:<3d}  bonded to: [{}]",
+                      i, bonded.size(), angle_count, dihedral_count,
+                      bonded_str);
+  }
+
+  auto issues = check_issues();
+  if (issues.empty()) {
+    trajan::log::info("Validation: OK");
+  } else {
+    trajan::log::info("Validation: {} issue(s) found:", issues.size());
+    for (const auto &issue : issues) {
+      trajan::log::info("  [!] {}", issue);
+    }
+  }
 }
 
 std::string Topology::to_string() const {

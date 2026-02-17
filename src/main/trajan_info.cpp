@@ -44,6 +44,37 @@ void run_info_subcommand(const InfoOpts &opts, Trajectory &traj) {
     } else {
       trajan::log::info("No unit cell information");
     }
+    using ankerl::unordered_dense::map;
+    map<std::string, size_t> atom_type_count;
+    map<std::string, std::string> atom_type_elements;
+    double mass = 0.0;
+    size_t total_atoms = traj.atoms().size();
+    for (const auto &a : traj.atoms()) {
+      atom_type_count[a.type]++;
+      atom_type_elements[a.type] = a.element.symbol();
+      mass += a.element.mass();
+    }
+    trajan::log::info("Total atom count: {}", total_atoms);
+    trajan::log::info("Unique atom types:");
+    for (const auto &[at, count] : atom_type_count) {
+      const auto &e = atom_type_elements[at];
+      trajan::log::info("{:>5} ({:>2}): {:>10}", at, e, count);
+    }
+    size_t width = 12;
+    trajan::log::info("Atom properties:");
+    trajan::log::info("{:>{}}: {:>10.4f} g/mol", "total mass", width, mass);
+    if (uc) {
+      trajan::log::info("{:>{}}: {:>10.4f} g/cm^3", "density", width,
+                        mass / uc->volume() * 1.6605388);
+      trajan::log::info("{:>{}}: {:>10.4f} atom/Å^3 ", "density", width,
+                        total_atoms / uc->volume());
+    }
+    core::Topology &top = traj.get_topology();
+    top.print_summary();
+    if (opts.detailed_top) {
+      traj.frame().populate_angles(top);
+      top.print_detailed();
+    }
   }
 };
 
@@ -52,9 +83,9 @@ CLI::App *add_info_subcommand(CLI::App &app, Trajectory &traj) {
       app.add_subcommand("info", "Prints out a variety of information within "
                                  "the current Trajectory object.");
   auto opts = std::make_shared<InfoOpts>();
-  info->add_option("--density", opts->density,
-                   "Whether to output density info.");
-  info->add_option("--cell", opts->cell, "Whether to output cell info.");
+  info->add_flag("--detailed-topology", opts->detailed_top,
+                 "Whether to output detailed topology info (if there is any "
+                 "topology info).");
   info->add_option("--timings", opts->timings,
                    "Whether to output timing info.");
 

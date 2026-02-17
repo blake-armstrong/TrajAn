@@ -15,12 +15,10 @@ using trajan::core::AtomGraph;
 
 struct Angle {
   std::array<size_t, 3> atom_indices; // [atom1, center_atom, atom3]
-  double equilibrium_angle;           // in radians
-  double force_constant;
+  double theta;                       // in radians
 
-  Angle() : equilibrium_angle(0.0), force_constant(0.0) {}
-  Angle(size_t i, size_t j, size_t k)
-      : atom_indices({i, j, k}), equilibrium_angle(0.0), force_constant(0.0) {}
+  Angle() : theta(0.0) {}
+  Angle(size_t i, size_t j, size_t k) : atom_indices({i, j, k}), theta(0.0) {}
   size_t center_atom() const { return atom_indices[1]; }
   size_t atom1() const { return atom_indices[0]; }
   size_t atom3() const { return atom_indices[2]; }
@@ -71,16 +69,12 @@ inline DihedralType dihedral_type_from_string(const std::string &str) {
 struct Dihedral {
   std::array<size_t, 4> atom_indices; // [atom1, atom2, atom3, atom4]
   DihedralType type;
-  double equilibrium_angle; // in radians
-  double force_constant;
-  int multiplicity; // for periodic dihedrals
-  Dihedral()
-      : type(DihedralType::PROPER), equilibrium_angle(0.0), force_constant(0.0),
-        multiplicity(1) {}
+  double phi; // in radians
+  double distance;
+  Dihedral() : type(DihedralType::PROPER), phi(0.0) {}
   Dihedral(size_t i, size_t j, size_t k, size_t l,
            DihedralType t = DihedralType::PROPER)
-      : atom_indices({i, j, k, l}), type(t), equilibrium_angle(0.0),
-        force_constant(0.0), multiplicity(1) {}
+      : atom_indices({i, j, k, l}), type(t), phi(0.0) {}
   size_t atom2() const { return atom_indices[1]; }
   size_t atom3() const { return atom_indices[2]; }
   bool operator==(const Dihedral &other) const {
@@ -154,7 +148,8 @@ public:
   bool update_bond(size_t atom1, size_t atom2, const Bond &updated_bond);
   std::vector<Bond> get_bonds_involving_atom(size_t atom_idx) const;
 
-  std::vector<Molecule> extract_molecules() const;
+  void generate_molecules();
+  const std::vector<Molecule> &get_molecules() const { return m_molecules; };
 
   // inline size_t num_bonds() const { return get_bonds().size(); }
   inline size_t num_bonds() const { return m_bond_storage.size(); }
@@ -162,22 +157,31 @@ public:
   inline size_t num_dihedrals() const { return m_dihedrals.size(); }
   size_t num_proper_dihedrals() const;
   size_t num_improper_dihedrals() const;
+  void populate_angles(const std::optional<occ::crystal::UnitCell> &unit_cell);
 
   bool validate_topology() const;
   std::vector<std::string> check_issues() const;
 
   void print_summary() const;
+  void print_detailed() const;
   std::string to_string() const;
 
   // access to underlying graph
   const AtomGraph &get_atom_graph() const { return m_atom_graph; }
   AtomGraph &get_atom_graph() { return m_atom_graph; }
 
+  std::vector<Angle> &angles() { return m_angles; }
+  const std::vector<Angle> &angles() const { return m_angles; }
+  std::vector<Dihedral> &dihedrals() { return m_dihedrals; }
+  const std::vector<Dihedral> &dihedrals() const { return m_dihedrals; }
+
 private:
   std::vector<Atom> m_atoms;
   mutable AtomGraph m_atom_graph;
   std::vector<Angle> m_angles;
   std::vector<Dihedral> m_dihedrals;
+  std::vector<Molecule> m_molecules;
+  ankerl::unordered_dense::map<size_t, size_t> m_atom_to_molecule;
 
   // fast lookup structures for angles and dihedrals
   ankerl::unordered_dense::set<Angle, Angle::Hash> m_angle_set;
@@ -198,11 +202,6 @@ private:
                                                        size_t atom2) const;
   std::vector<Dihedral>
   find_improper_dihedrals_around_atom(size_t center_atom) const;
-
-  static double calculate_angle(const Vec3 &pos1, const Vec3 &pos_center,
-                                const Vec3 &pos3);
-  static double calculate_dihedral(const Vec3 &pos1, const Vec3 &pos2,
-                                   const Vec3 &pos3, const Vec3 &pos4);
 };
 
 } // namespace trajan::core

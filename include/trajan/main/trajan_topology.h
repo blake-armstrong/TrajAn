@@ -17,16 +17,15 @@ struct BondCriteria {
 
 struct TopologyOpts {
   bool top_auto{true};
+  bool use_input_topology{false};
   int update_frequency{0};
   std::vector<std::string> nb_raw_sel;
   std::vector<std::string> bc_raw_sel;
-  // std::vector<io::SelectionCriteria> nb_parsed_sel;
-  // std::vector<BondCriteria> bond_criterias;
   double bond_tolerance;
 };
 
 const auto MOLECULE_RESTRICTIONS =
-    std::make_optional<std::vector<char>>({'j', 'm'});
+    std::make_optional<std::vector<char>>({'i', 'a'});
 
 BondCriteria bond_criteria_validator(
     const std::string &input,

@@ -1,3 +1,5 @@
+#include "trajan/core/topology.h"
+#include "trajan/core/util.h"
 #include <fmt/core.h>
 #include <occ/crystal/unitcell.h>
 #include <stdexcept>
@@ -87,6 +89,67 @@ void Frame::update_atom_position(size_t idx, Vec3 &pos) {
     throw std::runtime_error("Bad index.");
   }
   m_atoms[idx].set_position(pos);
+}
+
+void Frame::populate_angles(Topology &top) {
+  const Mat3N cart_pos = this->cart_pos();
+  Mat3N frac_pos;
+  if (m_unit_cell) {
+    frac_pos = m_unit_cell->to_fractional(cart_pos);
+  }
+  auto &angles = top.angles();
+  trajan::log::debug("Populating angles theta");
+  for (auto &angle : angles) {
+    occ::Vec3 b1, b2;
+    if (m_unit_cell) {
+      b1 = frac_pos.col(angle.center_atom()) - frac_pos.col(angle.atom1());
+      b1 = b1.array() - b1.array().round();
+      b1 = m_unit_cell->to_cartesian(b1);
+      b2 = frac_pos.col(angle.center_atom()) - frac_pos.col(angle.atom3());
+      b2 = b2.array() - b2.array().round();
+      b2 = m_unit_cell->to_cartesian(b2);
+    } else {
+      b1 = cart_pos.col(angle.center_atom()) - cart_pos.col(angle.atom1());
+      b2 = cart_pos.col(angle.center_atom()) - cart_pos.col(angle.atom3());
+    }
+    angle.theta = trajan::util::angle_between(b1, b2);
+  }
+  auto &dihedrals = top.dihedrals();
+  size_t d1, d2, d3, d4;
+  trajan::log::debug("Populating dihedrals phi/distance");
+  for (auto &dihedral : dihedrals) {
+    occ::Vec3 b1, b2, b3;
+    d1 = dihedral.atom_indices[0];
+    d2 = dihedral.atom_indices[1];
+    d3 = dihedral.atom_indices[2];
+    d4 = dihedral.atom_indices[3];
+    switch (dihedral.type) {
+    case trajan::core::DihedralType::PROPER:
+      b1 = frac_pos.col(d1) - frac_pos.col(d2);
+      b1 = b1.array() - b1.array().round();
+      b1 = m_unit_cell->to_cartesian(b1);
+      b2 = frac_pos.col(d2) - frac_pos.col(d3);
+      b2 = b2.array() - b2.array().round();
+      b2 = m_unit_cell->to_cartesian(b2);
+      b3 = frac_pos.col(d3) - frac_pos.col(d4);
+      b3 = b3.array() - b3.array().round();
+      b3 = m_unit_cell->to_cartesian(b3);
+      dihedral.phi = trajan::util::dihedral_between(b1, b2, b3);
+      break;
+    case trajan::core::DihedralType::IMPROPER:
+      b1 = frac_pos.col(d1) - frac_pos.col(d2);
+      b1 = b1.array() - b1.array().round();
+      b1 = m_unit_cell->to_cartesian(b1);
+      b2 = frac_pos.col(d1) - frac_pos.col(d3);
+      b2 = b2.array() - b2.array().round();
+      b2 = m_unit_cell->to_cartesian(b2);
+      b3 = frac_pos.col(d1) - frac_pos.col(d4);
+      b3 = b3.array() - b3.array().round();
+      b3 = m_unit_cell->to_cartesian(b3);
+      dihedral.distance = trajan::util::out_of_plane_distance(b1, b2, b3);
+      break;
+    }
+  }
 }
 
 } // namespace trajan::core

@@ -61,6 +61,7 @@ bond_criteria_validator(const std::string &input,
 }
 
 void run_topology_subcommand(const TopologyOpts &opts, Trajectory &traj) {
+  trajan::log::debug("Beginning topology subcommand");
   core::TopologyUpdateSettings settings;
   for (const std::string &bc_str : opts.bc_raw_sel) {
     BondCriteria bond_criteria =
@@ -86,23 +87,24 @@ void run_topology_subcommand(const TopologyOpts &opts, Trajectory &traj) {
     bond_cutoff.threshold = bond_criteria.threshold;
     settings.bond_cutoffs.push_back(bond_cutoff);
   }
-  std::vector<io::SelectionCriteria> nb_parsed_sel;
   for (const std::string &input : opts.nb_raw_sel) {
+    trajan::log::debug("Processing --no-bond");
     auto nb_parsed_sels = io::selection_validator(input, MOLECULE_RESTRICTIONS);
     for (const auto &sel : nb_parsed_sels) {
-      nb_parsed_sel.push_back(sel);
+      settings.no_bonds.push_back(sel);
     }
   }
-  auto nbatoms = traj.get_atoms(nb_parsed_sel);
-  settings.no_bonds.reserve(nbatoms.size());
-  for (const auto &a : nbatoms) {
-    settings.no_bonds.push_back(a.index);
-  }
-  std::sort(settings.no_bonds.begin(), settings.no_bonds.end());
+  // auto nbatoms = traj.get_atoms(nb_parsed_sel);
+  // settings.no_bonds.reserve(nbatoms.size());
+  // for (const auto &a : nbatoms) {
+  //   settings.no_bonds.push_back(a.index);
+  // }
+  // std::sort(settings.no_bonds.begin(), settings.no_bonds.end());
   settings.top_auto = opts.top_auto;
   settings.bond_tolerance = opts.bond_tolerance;
   settings.update_frequency = opts.update_frequency;
   settings.compute_topology = true;
+  settings.use_input_topology = opts.use_input_topology;
   occ::core::set_bond_tolerance(opts.bond_tolerance);
   traj.set_topology_settings(settings);
 }
@@ -119,34 +121,35 @@ CLI::App *add_topology_subcommand(CLI::App &app, Trajectory &traj) {
                   "  i1,2,3-5    (atom indices 1,2,3,4,5)\n"
                   "  aC,N,O      (atom types C, N, O)\n"
                   "  j/m not allowed\n");
-  // ->check(io::selection_validator(
-  //     opts->nb_parsed_sel,
-  //     std::make_optional<std::vector<char>>({'j', 'm'})));
   top->add_option(
          "--bond-criteria", opts->bc_raw_sel,
-         "Selected pairs of atoms will only be allowed to form a bond if the "
-         "distance criteria is less than or greater than the input "
+         "Selected pairs of atoms will only be allowed to form a bond if the \n"
+         "distance criteria is less than or greater than the input \n"
          "threshold.\n Selection one and two should be separated by '&'.\n "
-         "Examples:\n  i1,2,3-5&aC,N,O<1.4 (bonds only formed between atom "
-         "indices 1,2,3,4,5 and atom types C,N,O when separated by less than "
+         "Examples:\n  i1,2,3-5&aC,N,O<1.4 (bonds only formed between atom \n"
+         "indices 1,2,3,4,5 and atom types C,N,O when separated by less than \n"
          "1.4 Angstroms.)\n  i1,2&aN,H>2.5\n")
       ->type_size(0, -1);
-  // ->each(bond_criteria_validator(
-  //     opts->bond_criterias,
-  //     std::make_optional<std::vector<char>>({'j', 'm'})));
   opts->bond_tolerance = occ::core::get_bond_tolerance();
   top->add_option("--bond-tolerance", opts->bond_tolerance,
-                  "Bond tolerance in Angstroms to use when deciding if two "
-                  "atoms are bonded. This number is added to the sum of the "
+                  "Bond tolerance in Angstroms to use when deciding if two \n"
+                  "atoms are bonded. This number is added to the sum of the \n"
                   "covalent radii.\n");
   top->add_option(
       "--update-frequency", opts->update_frequency,
       "How often to recompute the topology. Default is set to 0 which means to "
+      "\n"
       "only compute the topology once at the start of the trajectory analysis. "
+      "\n"
       "This means the topology is assumed to unchage throughout. Setting this "
+      "\n"
       "to anything other than 0 will slow down the trajectory analysis, but it "
-      "can be useful when analysing non-classical or reactive-classical "
+      "\n"
+      "can be useful when analysing non-classical or reactive-classical \n"
       "simulations.\n");
+  top->add_option("--from-file", opts->use_input_topology,
+                  "Create the system topology from an input file (e.g., from "
+                  "the CONECT line in a PDB file.)");
   top->callback([opts, &traj]() {
     trajan::log::set_subcommand_log_pattern("top");
     run_topology_subcommand(*opts, traj);

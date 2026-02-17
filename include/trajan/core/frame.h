@@ -54,6 +54,10 @@ public:
     m_atom_graph = atom_graph;
   }
   inline const AtomGraph &get_atom_graph() const { return m_atom_graph; }
+  inline void set_topology(const Topology &topology) { m_topology = topology; }
+  inline const Topology &get_topology() const { return m_topology; }
+
+  void populate_angles(Topology &top);
 
   Frame() = default;
 
@@ -79,6 +83,7 @@ private:
   double m_charge = 0.0;
   int m_multiplicity = 1;
   AtomGraph m_atom_graph;
+  Topology m_topology;
 
   void update_positions();
 };
