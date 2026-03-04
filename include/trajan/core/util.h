@@ -221,6 +221,12 @@ inline std::pair<Mat3N, Mat3N> wrap_coordinates(const Mat3N &cart_pos,
   return {frac_pos, wrapped_cart_pos};
 }
 
+inline occ::Vec3 wrap_distance(const occ::Vec3 &v1, const UnitCell &uc) {
+  occ::Vec3 frac_v1 = uc.to_fractional(v1);
+  frac_v1 = frac_v1.array() - frac_v1.array().round();
+  return uc.to_cartesian(frac_v1);
+}
+
 inline bool unitcell_is_reasonable(double a, double b, double c, double alpha,
                                    double beta, double gamma,
                                    double ltol = 1e-6, double htol = 1e6) {

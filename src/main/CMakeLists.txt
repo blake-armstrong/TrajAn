@@ -3,6 +3,7 @@ add_library(trajan_main
   "${CMAKE_CURRENT_SOURCE_DIR}/trajan_info.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/trajan_topology.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/trajan_rdf.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/trajan_qc.cpp"
   #  "${CMAKE_CURRENT_SOURCE_DIR}/trajan_opt.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/version.cpp"
   ${TRAJAN_MAIN_INCLUDE_FILES}

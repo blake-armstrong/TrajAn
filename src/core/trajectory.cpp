@@ -401,6 +401,7 @@ std::vector<Molecule> Trajectory::get_molecules() {
   // auto &atoms = this->atoms();
   // for (const auto &m : molecules) {
   // }
+  m_topology.update_atom_positions(this->atoms());
   return m_topology.get_molecules();
 }
 

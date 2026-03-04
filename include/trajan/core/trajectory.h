@@ -84,6 +84,7 @@ public:
   std::vector<Molecule> get_molecules(const io::SelectionCriteria &selection);
   std::vector<Molecule>
   get_molecules(const std::vector<io::SelectionCriteria> &selections);
+  void update_molecules(std::vector<Molecule> &molecules);
 
   Topology &get_topology(
       const std::optional<TopologyUpdateSettings> &settings = std::nullopt);

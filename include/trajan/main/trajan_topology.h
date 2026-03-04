@@ -1,4 +1,5 @@
 #pragma once
+#include "trajan/core/topology.h"
 #include <CLI/CLI.hpp>
 #include <trajan/core/trajectory.h>
 #include <trajan/core/util.h>
@@ -24,8 +25,7 @@ struct TopologyOpts {
   double bond_tolerance;
 };
 
-const auto MOLECULE_RESTRICTIONS =
-    std::make_optional<std::vector<char>>({'i', 'a'});
+using trajan::core::MOLECULE_RESTRICTIONS;
 
 BondCriteria bond_criteria_validator(
     const std::string &input,

@@ -362,6 +362,27 @@ std::vector<size_t> Topology::get_atoms_at_distance(size_t atom_idx,
   return std::vector<size_t>(final_level.begin(), final_level.end());
 }
 
+void Topology::update_atom_positions(const std::vector<Atom> &atoms) {
+  // Update m_atoms first
+  for (const auto &atom : atoms) {
+    if (atom.index < m_atoms.size()) {
+      m_atoms[atom.index].x = atom.x;
+      m_atoms[atom.index].y = atom.y;
+      m_atoms[atom.index].z = atom.z;
+    }
+  }
+
+  for (auto &molecule : m_molecules) {
+    for (auto &mol_atom : molecule.atoms()) {
+      if (mol_atom.index < atoms.size()) {
+        mol_atom.x = atoms[mol_atom.index].x;
+        mol_atom.y = atoms[mol_atom.index].y;
+        mol_atom.z = atoms[mol_atom.index].z;
+      }
+    }
+  }
+}
+
 void Topology::generate_molecules() {
 
   auto components = m_atom_graph.connected_components();
@@ -401,18 +422,21 @@ void Topology::generate_molecules() {
     molecule.index = m_molecules.size();
     molecule.uindex = residue_index[0];
     molecule.utype = residue_name[0];
-    molecule.type = fmt::format("M{}", unique_molecule_counter + 1);
+    bool unique{true};
     for (const auto &m : m_molecules) {
       if (molecule.is_comparable_to(m)) {
         molecule.type = m.type;
+        unique = false;
         break;
       }
-      unique_molecule_counter++;
+    }
+    if (unique) {
       molecule.type = fmt::format("M{}", unique_molecule_counter + 1);
+      unique_molecule_counter++;
     }
     molecule_counts[molecule.type]++;
     molecule.subindex = molecule_counts[molecule.type];
-    m_molecules.emplace_back(atoms);
+    m_molecules.push_back(molecule);
     for (const auto &a : atoms) {
       m_atom_to_molecule[a.index] = molecule.index;
     }

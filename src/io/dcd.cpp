@@ -38,9 +38,9 @@ void DCDHandler::_finalise() {
 }
 
 bool DCDHandler::read_next_frame(Frame &frame) {
-  if (m_current_frame >= m_total_frames) {
-    return false;
-  }
+  // if (m_current_frame >= m_total_frames) {
+  //   return false;
+  // }
 
   bool success = this->parse_dcd(frame);
   if (success) {
@@ -310,7 +310,8 @@ bool DCDHandler::_parse_dcd(core::Frame &frame) {
   if (m_is_charmm_format && m_has_extra_block) {
     std::vector<char> unitcell_buffer;
     if (!read_fortran_record(unitcell_buffer)) {
-      throw std::runtime_error("Failed to read unit cell record");
+      trajan::log::warn("Failed to read unit cell record");
+      return false;
     }
 
     // Parse unit cell data (6 doubles: a, b, c, alpha, beta, gamma)

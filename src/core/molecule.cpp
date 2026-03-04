@@ -1,3 +1,4 @@
+#include "occ/core/units.h"
 #include <trajan/core/molecule.h>
 
 namespace trajan::core {
@@ -9,7 +10,10 @@ convert_atoms(const std::vector<Atom> &atoms) {
 
   for (const auto &atom : atoms) {
     const auto &pos = atom.position();
-    occ::core::Atom occ_atom(atom.atomic_number(), pos[0], pos[1], pos[2]);
+    occ::core::Atom occ_atom(atom.atomic_number(),
+                             pos[0] * occ::units::ANGSTROM_TO_BOHR,
+                             pos[1] * occ::units::ANGSTROM_TO_BOHR,
+                             pos[2] * occ::units::ANGSTROM_TO_BOHR);
     occ_atoms.push_back(occ_atom);
   }
 
@@ -20,7 +24,8 @@ EnhancedMolecule::EnhancedMolecule(const std::vector<Atom> &atoms)
     : occ::core::Molecule(convert_atoms(atoms)), enhanced_atoms(atoms) {}
 
 std::vector<int> EnhancedMolecule::atom_indices() const {
-  std::vector<int> atom_indices(enhanced_atoms.size());
+  std::vector<int> atom_indices;
+  atom_indices.reserve(enhanced_atoms.size());
   for (const auto &atom : enhanced_atoms) {
     atom_indices.push_back(atom.index);
   }

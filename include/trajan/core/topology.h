@@ -100,6 +100,11 @@ struct BondPairHash {
   }
 };
 
+const auto MOLECULE_RESTRICTIONS =
+    std::make_optional<std::vector<char>>({'i', 'a'});
+const auto ATOM_RESTRICTIONS =
+    std::make_optional<std::vector<char>>({'j', 'm'});
+
 class Topology {
 public:
   Topology() = default;
@@ -149,6 +154,7 @@ public:
   std::vector<Bond> get_bonds_involving_atom(size_t atom_idx) const;
 
   void generate_molecules();
+  void update_atom_positions(const std::vector<Atom> &atoms);
   const std::vector<Molecule> &get_molecules() const { return m_molecules; };
 
   // inline size_t num_bonds() const { return get_bonds().size(); }

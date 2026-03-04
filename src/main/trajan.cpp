@@ -5,6 +5,7 @@
 // #include <trajan/main/trajan_opt.h>
 #include <trajan/main/trajan_info.h>
 #include <trajan/main/trajan_load.h>
+#include <trajan/main/trajan_qc.h>
 #include <trajan/main/trajan_rdf.h>
 #include <trajan/main/trajan_topology.h>
 #include <trajan/main/version.h>
@@ -36,6 +37,7 @@ int main(int argc, char *argv[]) {
   auto *top = trajan::main::add_topology_subcommand(app, trajectory);
   auto *info = trajan::main::add_info_subcommand(app, trajectory);
   auto *rdf = trajan::main::add_rdf_subcommand(app, trajectory);
+  auto *qc = trajan::main::add_qc_subcommand(app, trajectory);
 
   // auto *opt = trajan::main::add_opt_subcommand(app);
 

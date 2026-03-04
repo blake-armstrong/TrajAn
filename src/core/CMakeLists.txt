@@ -10,7 +10,7 @@ add_library(
   "${CMAKE_CURRENT_SOURCE_DIR}/topology.cpp"
 )
 
-target_link_libraries(trajan_core PUBLIC fmt::fmt spdlog::spdlog Eigen3::Eigen unordered_dense::unordered_dense occ_core occ_crystal)
+target_link_libraries(trajan_core PUBLIC fmt::fmt spdlog::spdlog Eigen3::Eigen unordered_dense::unordered_dense occ_core occ_crystal nlohmann_json::nlohmann_json)
 
 target_include_directories(trajan_core PUBLIC "${TRAJAN_INCLUDE_DIR}")
 

@@ -12,7 +12,7 @@ using Atom = trajan::core::EnhancedAtom;
 
 class EnhancedMolecule : public occ::core::Molecule {
 public:
-  std::string type, utype{"UNK"};
+  std::string type{"UNK"}, utype{"UNK"};
   int index, uindex{0}, subindex;
   std::vector<Atom> enhanced_atoms;
 
@@ -20,18 +20,35 @@ public:
     return this->index == rhs.index;
   };
 
+  inline std::vector<std::string> element_symbols() const {
+    std::vector<std::string> elements_str;
+    elements_str.reserve(this->elements().size());
+    for (const auto &e : this->elements()) {
+      elements_str.push_back(e.symbol());
+    }
+    return elements_str;
+  }
+
+  inline std::vector<std::string> atom_types() const {
+    std::vector<std::string> atom_types;
+    atom_types.reserve(enhanced_atoms.size());
+    for (const auto &a : enhanced_atoms) {
+      atom_types.push_back(a.type);
+    }
+    return atom_types;
+  }
+
   EnhancedMolecule(const std::vector<Atom> &atoms);
 
   std::vector<int> atom_indices() const;
+  inline const std::vector<Atom> &atoms() const { return enhanced_atoms; }
+  inline std::vector<Atom> &atoms() { return enhanced_atoms; }
 
   inline const std::string repr() const {
     auto pos = this->center_of_mass();
     auto indices = this->atom_indices();
     auto elements = this->elements();
-    std::vector<std::string> elements_str(elements.size());
-    for (const auto &e : elements) {
-      elements_str.push_back(e.symbol());
-    }
+    std::vector<std::string> elements_str = this->element_symbols();
 
     return fmt::format("Molecule(index={}, type={}, elements=[{}], atoms=[{}], "
                        "x={:.4f}, y={:.4f}, z={:.4f})",
