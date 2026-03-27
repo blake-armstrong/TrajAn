@@ -268,13 +268,6 @@ Quaterniond apply_c3_symmetry(const Quaterniond &q_in) {
   Quaterniond q120 = q * Quaterniond(rot120);
   Quaterniond q240 = q * Quaterniond(rot240);
 
-  trajan::log::info("q0  : {:.4f} {:.4f} {:.4f} {:.4f}", q0.w(), q0.x(), q0.y(),
-                    q0.z());
-  trajan::log::info("q120: {:.4f} {:.4f} {:.4f} {:.4f}", q120.w(), q120.x(),
-                    q120.y(), q120.z());
-  trajan::log::info("q240: {:.4f} {:.4f} {:.4f} {:.4f}", q240.w(), q240.x(),
-                    q240.y(), q240.z());
-
   auto score = [](const Quaterniond &qq) { return std::abs(qq.w()); };
 
   double s0 = score(q0);
@@ -592,8 +585,6 @@ void run_qc_train(QCOpts const &opts, Trajectory &traj) {
 
   for (int c = 0; c < k; ++c) {
     double percent = 100.0 * config_counts[c] / trajectory_states.size();
-    trajan::log::info("  Config {}: {:.1f}% ({} frames)", c, percent,
-                      config_counts[c]);
   }
 }
 
@@ -618,12 +609,9 @@ void run_qc_analyse(QCOpts const &opts, Trajectory &traj) {
   // DEBUG: Print loaded quaternions
   trajan::log::debug("Loaded quaternions from ref file:");
   for (int c = 0; c < k; ++c) {
-    trajan::log::debug("Config {}:", c);
     for (size_t i = 0; i < reference_configs[c].carbonate_orientations.size();
          ++i) {
       const auto &q = reference_configs[c].carbonate_orientations[i];
-      trajan::log::debug("  Carb {}: [{:.4f}, {:.4f}, {:.4f}, {:.4f}]", i,
-                         q.w(), q.x(), q.y(), q.z());
     }
   }
 
@@ -653,8 +641,6 @@ void run_qc_analyse(QCOpts const &opts, Trajectory &traj) {
         q = apply_c3_symmetry(q);
       }
       state.carbonate_orientations.push_back(q);
-      trajan::log::info("qfinal: {:.4f} {:.4f} {:.4f} {:.4f}", q.w(), q.x(),
-                        q.y(), q.z());
     }
     // print_surface_configuration(state, 0);
 
@@ -666,7 +652,7 @@ void run_qc_analyse(QCOpts const &opts, Trajectory &traj) {
       throw std::runtime_error("Carbonate count mismatch");
     }
 
-    print_surface_configuration(state, frame_num);
+    // print_surface_configuration(state, frame_num);
 
     double min_dist = 1e9;
     int best_config = 0;

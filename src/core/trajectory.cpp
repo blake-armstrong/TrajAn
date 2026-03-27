@@ -1,6 +1,5 @@
 #include <algorithm>
 #include <cmath>
-#include <mach/message.h>
 #include <occ/core/element.h>
 #include <occ/crystal/unitcell.h>
 #include <optional>
