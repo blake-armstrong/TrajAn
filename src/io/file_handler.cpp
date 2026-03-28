@@ -72,8 +72,10 @@ void check_handlers(std::vector<FileHandlerPtr> &handlers) {
       file_type_counts.count(FileType::DCD) > 0) {
     trajan::log::warn("DCD(s) loaded without a topology file.");
   }
-  if (file_type_counts.count(FileType::PDB) == 0 &&
-      file_type_counts.count(FileType::DCD) == 0) {
+  bool has_data = file_type_counts.count(FileType::PDB) > 0 ||
+                  file_type_counts.count(FileType::DCD) > 0 ||
+                  file_type_counts.count(FileType::XYZ) > 0;
+  if (!has_data) {
     throw std::runtime_error("No files!");
   }
 };

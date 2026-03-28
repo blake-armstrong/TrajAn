@@ -1,4 +1,5 @@
 #include "trajan/core/util.h"
+#include <cmath>
 #include <memory>
 #include <occ/core/linear_algebra.h>
 #include <occ/crystal/unitcell.h>
@@ -10,18 +11,22 @@ using occ::crystal::UnitCell;
 using trajan::core::Frame;
 
 bool XTCHandler::_initialise() {
-  m_infile.open(this->file_path(), std::ios::binary);
-  if (!m_infile.is_open()) {
-    return false;
-  }
-
   if (m_mode == Mode::Read) {
+    m_infile.open(this->file_path(), std::ios::binary);
+    if (!m_infile.is_open()) {
+      return false;
+    }
+    m_infile.close();
     m_xtcreader = std::make_unique<XTCReader>(this->file_path());
+    return true;
   } else {
-    m_xtcwriter = std::make_unique<XTCWriter>(this->file_path());
+    try {
+      m_xtcwriter = std::make_unique<XTCWriter>(this->file_path());
+    } catch (const std::exception &) {
+      return false;
+    }
+    return m_xtcwriter->is_open();
   }
-  m_infile.close();
-  return true;
 }
 
 void XTCHandler::_finalise() {}
@@ -39,13 +44,23 @@ bool XTCHandler::read_next_frame(Frame &frame) {
       m(col, row) = static_cast<double>(m_xtcreader->box[row][col]) * 10.0;
     }
   }
-  if (trajan::util::unitcell_is_reasonable(m)) {
-    UnitCell uc(m);
-    frame.set_unit_cell(uc);
+  {
+    // Columns of m are the lattice vectors
+    occ::Vec3 a_vec = m.col(0), b_vec = m.col(1), c_vec = m.col(2);
+    double a = a_vec.norm(), b = b_vec.norm(), c = c_vec.norm();
+    double cos_alpha = std::clamp(b_vec.dot(c_vec) / (b * c), -1.0, 1.0);
+    double cos_beta  = std::clamp(a_vec.dot(c_vec) / (a * c), -1.0, 1.0);
+    double cos_gamma = std::clamp(a_vec.dot(b_vec) / (a * b), -1.0, 1.0);
+    double alpha = std::acos(cos_alpha), beta = std::acos(cos_beta),
+           gamma = std::acos(cos_gamma);
+    if (trajan::util::unitcell_is_reasonable(a, b, c, alpha, beta, gamma)) {
+      UnitCell uc = occ::crystal::triclinic_cell(a, b, c, alpha, beta, gamma);
+      frame.set_unit_cell(uc);
+    }
   }
 
   size_t natoms = m_xtcreader->X.size() / 3;
-  for (int i; i < natoms; i++) {
+  for (size_t i = 0; i < natoms; i++) {
     int iatom = i * 3;
     occ::Vec3 pos = {m_xtcreader->X[iatom] * 10.0,
                      m_xtcreader->X[iatom + 1] * 10.0,

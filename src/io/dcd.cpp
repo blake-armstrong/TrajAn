@@ -38,9 +38,9 @@ void DCDHandler::_finalise() {
 }
 
 bool DCDHandler::read_next_frame(Frame &frame) {
-  // if (m_current_frame >= m_total_frames) {
-  //   return false;
-  // }
+  if (m_total_frames > 0 && m_current_frame >= m_total_frames) {
+    return false;
+  }
 
   bool success = this->parse_dcd(frame);
   if (success) {

@@ -1020,7 +1020,7 @@ TEST_CASE("Connected Components and Molecules", "[unit][topology][molecules]") {
     auto atoms = create_test_atoms();
     Topology topology(atoms);
 
-    auto molecules = topology.extract_molecules();
+    auto molecules = topology.get_molecules();
     REQUIRE(molecules.size() == 1);
     REQUIRE(molecules[0].size() == 5); // C + 4H
   }
@@ -1029,7 +1029,7 @@ TEST_CASE("Connected Components and Molecules", "[unit][topology][molecules]") {
     auto atoms = create_disconnected_atoms();
     Topology topology(atoms);
 
-    auto molecules = topology.extract_molecules();
+    auto molecules = topology.get_molecules();
     REQUIRE(molecules.size() == 2);
     REQUIRE(molecules[0].size() == 2); // H2
     REQUIRE(molecules[1].size() == 2); // H2
@@ -1039,7 +1039,7 @@ TEST_CASE("Connected Components and Molecules", "[unit][topology][molecules]") {
     std::vector<Atom> empty_atoms;
     Topology topology(empty_atoms);
 
-    auto molecules = topology.extract_molecules();
+    auto molecules = topology.get_molecules();
     REQUIRE(molecules.empty());
   }
 }
@@ -1081,7 +1081,6 @@ TEST_CASE("Topology String Representation", "[unit][topology][string]") {
   Topology topology;
   topology.add_bond(0, 1, 1.0);
   topology.add_bond(1, 2, 1.0);
-  topology.generate_all_from_bonds();
 
   SECTION("String representation") {
     std::string str = topology.to_string();
@@ -1178,7 +1177,166 @@ TEST_CASE("Performance and Memory", "[unit][topology]") {
   }
 }
 
-// tests requiring files
+// ── Frame unit tests ──────────────────────────────────────────────────────────
+
+TEST_CASE("Frame default construction", "[unit][frame]") {
+  Frame frame;
+  REQUIRE(frame.num_atoms() == 0);
+  REQUIRE_FALSE(frame.has_unit_cell());
+  REQUIRE(frame.index() == 0);
+  REQUIRE(frame.atoms().empty());
+}
+
+TEST_CASE("Frame set_atoms and accessors", "[unit][frame]") {
+  Frame frame;
+  auto atoms = create_test_atoms(); // 5-atom methane-like system
+  frame.set_atoms(atoms);
+
+  REQUIRE(frame.num_atoms() == 5);
+  REQUIRE(frame.atoms().size() == 5);
+
+  // Positions match
+  const auto &fa = frame.atoms();
+  REQUIRE_THAT(fa[0].x, Catch::Matchers::WithinAbs(0.0, 1e-9));
+  REQUIRE_THAT(fa[1].x, Catch::Matchers::WithinAbs(1.1, 1e-9));
+
+  // cart_pos matrix
+  auto pos = frame.cart_pos();
+  REQUIRE(pos.rows() == 3);
+  REQUIRE(pos.cols() == 5);
+  REQUIRE_THAT(pos(0, 0), Catch::Matchers::WithinAbs(0.0, 1e-9));
+  REQUIRE_THAT(pos(0, 1), Catch::Matchers::WithinAbs(1.1, 1e-9));
+}
+
+TEST_CASE("Frame set_atoms rejects empty vector", "[unit][frame]") {
+  Frame frame;
+  std::vector<Atom> empty;
+  REQUIRE_THROWS_AS(frame.set_atoms(empty), std::runtime_error);
+}
+
+TEST_CASE("Frame update_atom_position", "[unit][frame]") {
+  Frame frame;
+  frame.set_atoms(create_test_atoms());
+
+  Vec3 new_pos(5.0, 6.0, 7.0);
+  frame.update_atom_position(0, new_pos);
+
+  REQUIRE_THAT(frame.atoms()[0].x, Catch::Matchers::WithinAbs(5.0, 1e-9));
+  REQUIRE_THAT(frame.atoms()[0].y, Catch::Matchers::WithinAbs(6.0, 1e-9));
+  REQUIRE_THAT(frame.atoms()[0].z, Catch::Matchers::WithinAbs(7.0, 1e-9));
+}
+
+TEST_CASE("Frame update_atom_position out-of-bounds throws", "[unit][frame]") {
+  Frame frame;
+  frame.set_atoms(create_test_atoms());
+
+  Vec3 pos(1.0, 2.0, 3.0);
+  REQUIRE_THROWS_AS(frame.update_atom_position(999, pos), std::runtime_error);
+}
+
+TEST_CASE("Frame set_unit_cell and has_unit_cell", "[unit][frame]") {
+  Frame frame;
+  REQUIRE_FALSE(frame.has_unit_cell());
+
+  UnitCell uc = occ::crystal::cubic_cell(10.0);
+  frame.set_unit_cell(uc);
+
+  REQUIRE(frame.has_unit_cell());
+  REQUIRE_THAT(frame.unit_cell().value().a(),
+               Catch::Matchers::WithinAbs(10.0, 1e-9));
+}
+
+TEST_CASE("Frame copy constructor", "[unit][frame]") {
+  Frame original;
+  original.set_atoms(create_test_atoms());
+  UnitCell uc = occ::crystal::cubic_cell(15.0);
+  original.set_unit_cell(uc);
+  original.set_index(3);
+
+  Frame copy(original);
+
+  REQUIRE(copy.num_atoms() == original.num_atoms());
+  REQUIRE(copy.has_unit_cell());
+  REQUIRE_THAT(copy.unit_cell().value().a(),
+               Catch::Matchers::WithinAbs(15.0, 1e-9));
+  REQUIRE(copy.index() == 3);
+}
+
+TEST_CASE("Frame atomic_numbers", "[unit][frame]") {
+  Frame frame;
+  std::vector<Atom> atoms;
+  atoms.emplace_back(Vec3{0.0, 0.0, 0.0}, Element("C", true), 0);
+  atoms.emplace_back(Vec3{1.1, 0.0, 0.0}, Element("H", true), 1);
+  atoms.emplace_back(Vec3{-1.1, 0.0, 0.0}, Element("O", true), 2);
+  frame.set_atoms(atoms);
+
+  auto nums = frame.atomic_numbers();
+  REQUIRE(nums.size() == 3);
+  REQUIRE(nums[0] == 6);  // C
+  REQUIRE(nums[1] == 1);  // H
+  REQUIRE(nums[2] == 8);  // O
+}
+
+TEST_CASE("Frame cart_pos_flat", "[unit][frame]") {
+  Frame frame;
+  std::vector<Atom> atoms;
+  atoms.emplace_back(Vec3{1.0, 2.0, 3.0}, Element("C", true), 0);
+  atoms.emplace_back(Vec3{4.0, 5.0, 6.0}, Element("H", true), 1);
+  frame.set_atoms(atoms);
+
+  auto flat = frame.cart_pos_flat();
+  REQUIRE(flat.size() == 6);
+  REQUIRE_THAT(flat[0], Catch::Matchers::WithinAbs(1.0, 1e-9));
+  REQUIRE_THAT(flat[1], Catch::Matchers::WithinAbs(2.0, 1e-9));
+  REQUIRE_THAT(flat[2], Catch::Matchers::WithinAbs(3.0, 1e-9));
+  REQUIRE_THAT(flat[3], Catch::Matchers::WithinAbs(4.0, 1e-9));
+  REQUIRE_THAT(flat[4], Catch::Matchers::WithinAbs(5.0, 1e-9));
+  REQUIRE_THAT(flat[5], Catch::Matchers::WithinAbs(6.0, 1e-9));
+}
+
+// ── EnhancedAtom unit tests ───────────────────────────────────────────────────
+
+TEST_CASE("EnhancedAtom constructors", "[unit][atom]") {
+  SECTION("From atomic number and position") {
+    Atom a(6, Vec3{1.0, 2.0, 3.0});
+    REQUIRE(a.atomic_number() == 6);
+    REQUIRE_THAT(a.x, Catch::Matchers::WithinAbs(1.0, 1e-9));
+    REQUIRE_THAT(a.y, Catch::Matchers::WithinAbs(2.0, 1e-9));
+    REQUIRE_THAT(a.z, Catch::Matchers::WithinAbs(3.0, 1e-9));
+  }
+
+  SECTION("From element string and position") {
+    Atom a("C", Vec3{0.0, 0.0, 0.0});
+    REQUIRE(a.atomic_number() == 6);
+    REQUIRE(a.element.symbol() == "C");
+  }
+
+  SECTION("From position and Element object with index") {
+    Atom a(Vec3{1.0, 0.0, 0.0}, Element("N", true), 7);
+    REQUIRE(a.index == 7);
+    REQUIRE(a.element.symbol() == "N");
+  }
+}
+
+TEST_CASE("EnhancedAtom equality by index", "[unit][atom]") {
+  Atom a1(Vec3{0.0, 0.0, 0.0}, Element("C", true), 0);
+  Atom a2(Vec3{1.0, 0.0, 0.0}, Element("C", true), 0);
+  Atom a3(Vec3{0.0, 0.0, 0.0}, Element("C", true), 1);
+
+  REQUIRE(a1 == a2);   // same index
+  REQUIRE_FALSE(a1 == a3); // different index
+}
+
+TEST_CASE("EnhancedAtom is_bonded reflects covalent radii", "[unit][atom]") {
+  Atom c(Vec3{0.0, 0.0, 0.0}, Element("C", true), 0);
+  Atom h_close(Vec3{1.1, 0.0, 0.0}, Element("H", true), 1);
+  Atom h_far(Vec3{5.0, 0.0, 0.0}, Element("H", true), 2);
+
+  REQUIRE(c.is_bonded(h_close).has_value());
+  REQUIRE_FALSE(c.is_bonded(h_far).has_value());
+}
+
+// ── tests requiring files ─────────────────────────────────────────────────────
 
 TEST_CASE_METHOD(TestFixture, "Trajectory and Topology Integration",
                  "[file][trajectory][topology]") {
@@ -1191,7 +1349,7 @@ TEST_CASE_METHOD(TestFixture, "Trajectory and Topology Integration",
 
     const Topology &topology = trajectory.get_topology();
 
-    auto molecules = topology.extract_molecules();
+    auto molecules = topology.get_molecules();
     REQUIRE(molecules.size() > 0); // Should find water molecules
 
     // in this example file there are 4092 water molecules

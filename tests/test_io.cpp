@@ -7,6 +7,7 @@
 #include <catch2/matchers/catch_matchers_vector.hpp>
 #include <filesystem>
 #include <fstream>
+#include <occ/core/units.h>
 #include <occ/crystal/unitcell.h>
 #include <trajan/core/atomgraph.h>
 #include <trajan/core/log.h>
@@ -15,6 +16,8 @@
 #include <trajan/core/topology.h>
 #include <trajan/core/trajectory.h>
 #include <trajan/io/pdb.h>
+#include <trajan/io/xtc.h>
+#include <trajan/io/xyz.h>
 #include <trajan/io/selection.h>
 #include <vector>
 
@@ -499,4 +502,702 @@ TEST_CASE_METHOD(TestFixture, "DCD Read/Write into memory", "[file][io][dcd]") {
   }
 
   fs::remove(temp_dcd);
+}
+
+// ── XYZ / extended-XYZ tests (self-contained, no external test data needed) ──
+
+static std::vector<trajan::core::Atom>
+make_water_atoms() {
+  using trajan::core::Atom;
+  using trajan::core::Element;
+  std::vector<Atom> atoms;
+  atoms.emplace_back(occ::Vec3{0.000, 0.000, 0.000}, Element("O", true), 0);
+  atoms[0].type = "O";
+  atoms.emplace_back(occ::Vec3{0.960, 0.000, 0.000}, Element("H", true), 1);
+  atoms[1].type = "H";
+  atoms.emplace_back(occ::Vec3{-0.240, 0.927, 0.000}, Element("H", true), 2);
+  atoms[2].type = "H";
+  return atoms;
+}
+
+TEST_CASE("XYZ Write and Read Back - no unit cell", "[unit][io][xyz]") {
+  fs::path temp = "/tmp/test_xyz_basic.xyz";
+
+  {
+    trajan::io::XYZHandler writer;
+    writer.set_file_path(temp);
+    writer.initialise(trajan::io::FileHandler::Mode::Write);
+
+    trajan::core::Frame frame;
+    frame.set_atoms(make_water_atoms());
+    REQUIRE(writer.write_frame(frame));
+    writer.finalise();
+  }
+
+  trajan::core::Frame frame;
+  trajan::io::XYZHandler reader;
+  reader.set_file_path(temp);
+  reader.initialise(trajan::io::FileHandler::Mode::Read);
+  REQUIRE(reader.read_frame(frame));
+  reader.finalise();
+
+  REQUIRE(frame.num_atoms() == 3);
+  REQUIRE_FALSE(frame.has_unit_cell());
+
+  const auto &atoms = frame.atoms();
+  REQUIRE(atoms[0].element.symbol() == "O");
+  REQUIRE(atoms[1].element.symbol() == "H");
+  REQUIRE(atoms[2].element.symbol() == "H");
+  REQUIRE_THAT(atoms[0].x, Catch::Matchers::WithinAbs(0.000, 1e-5));
+  REQUIRE_THAT(atoms[1].x, Catch::Matchers::WithinAbs(0.960, 1e-5));
+  REQUIRE_THAT(atoms[2].x, Catch::Matchers::WithinAbs(-0.240, 1e-5));
+  REQUIRE_THAT(atoms[2].y, Catch::Matchers::WithinAbs(0.927, 1e-5));
+
+  fs::remove(temp);
+}
+
+TEST_CASE("XYZ Write and Read Back - extended XYZ with orthogonal Lattice",
+          "[unit][io][xyz]") {
+  fs::path temp = "/tmp/test_xyz_extended.xyz";
+  constexpr double a = 12.3, b = 13.4, c = 14.5;
+  const double alpha = occ::units::radians(90.0);
+  const double beta  = occ::units::radians(90.0);
+  const double gamma = occ::units::radians(90.0);
+
+  {
+    trajan::io::XYZHandler writer;
+    writer.set_file_path(temp);
+    writer.initialise(trajan::io::FileHandler::Mode::Write);
+
+    trajan::core::Frame frame;
+    frame.set_atoms(make_water_atoms());
+    auto uc = occ::crystal::triclinic_cell(a, b, c, alpha, beta, gamma);
+    frame.set_unit_cell(uc);
+    REQUIRE(writer.write_frame(frame));
+    writer.finalise();
+  }
+
+  trajan::core::Frame frame;
+  trajan::io::XYZHandler reader;
+  reader.set_file_path(temp);
+  reader.initialise(trajan::io::FileHandler::Mode::Read);
+  REQUIRE(reader.read_frame(frame));
+  reader.finalise();
+
+  REQUIRE(frame.num_atoms() == 3);
+  REQUIRE(frame.has_unit_cell());
+
+  const auto &uc = frame.unit_cell().value();
+  REQUIRE_THAT(uc.a(), Catch::Matchers::WithinAbs(a, 1e-4));
+  REQUIRE_THAT(uc.b(), Catch::Matchers::WithinAbs(b, 1e-4));
+  REQUIRE_THAT(uc.c(), Catch::Matchers::WithinAbs(c, 1e-4));
+  REQUIRE_THAT(occ::units::degrees(uc.alpha()),
+               Catch::Matchers::WithinAbs(90.0, 1e-3));
+  REQUIRE_THAT(occ::units::degrees(uc.beta()),
+               Catch::Matchers::WithinAbs(90.0, 1e-3));
+  REQUIRE_THAT(occ::units::degrees(uc.gamma()),
+               Catch::Matchers::WithinAbs(90.0, 1e-3));
+
+  fs::remove(temp);
+}
+
+TEST_CASE("XYZ Write and Read Back - triclinic cell", "[unit][io][xyz]") {
+  fs::path temp = "/tmp/test_xyz_triclinic.xyz";
+  constexpr double a = 10.0, b = 11.0, c = 12.0;
+  const double alpha = occ::units::radians(80.0);
+  const double beta  = occ::units::radians(85.0);
+  const double gamma = occ::units::radians(70.0);
+
+  {
+    trajan::io::XYZHandler writer;
+    writer.set_file_path(temp);
+    writer.initialise(trajan::io::FileHandler::Mode::Write);
+
+    trajan::core::Frame frame;
+    frame.set_atoms(make_water_atoms());
+    auto uc = occ::crystal::triclinic_cell(a, b, c, alpha, beta, gamma);
+    frame.set_unit_cell(uc);
+    REQUIRE(writer.write_frame(frame));
+    writer.finalise();
+  }
+
+  trajan::core::Frame frame;
+  trajan::io::XYZHandler reader;
+  reader.set_file_path(temp);
+  reader.initialise(trajan::io::FileHandler::Mode::Read);
+  REQUIRE(reader.read_frame(frame));
+  reader.finalise();
+
+  REQUIRE(frame.has_unit_cell());
+  const auto &uc = frame.unit_cell().value();
+  REQUIRE_THAT(uc.a(), Catch::Matchers::WithinAbs(a, 1e-4));
+  REQUIRE_THAT(uc.b(), Catch::Matchers::WithinAbs(b, 1e-4));
+  REQUIRE_THAT(uc.c(), Catch::Matchers::WithinAbs(c, 1e-4));
+  REQUIRE_THAT(occ::units::degrees(uc.alpha()),
+               Catch::Matchers::WithinAbs(80.0, 1e-3));
+  REQUIRE_THAT(occ::units::degrees(uc.beta()),
+               Catch::Matchers::WithinAbs(85.0, 1e-3));
+  REQUIRE_THAT(occ::units::degrees(uc.gamma()),
+               Catch::Matchers::WithinAbs(70.0, 1e-3));
+
+  fs::remove(temp);
+}
+
+TEST_CASE("XYZ multi-frame round-trip", "[unit][io][xyz]") {
+  fs::path temp = "/tmp/test_xyz_multiframe.xyz";
+
+  {
+    trajan::io::XYZHandler writer;
+    writer.set_file_path(temp);
+    writer.initialise(trajan::io::FileHandler::Mode::Write);
+
+    for (int f = 0; f < 3; ++f) {
+      trajan::core::Frame frame;
+      auto atoms = make_water_atoms();
+      for (auto &atom : atoms) {
+        atom.x += static_cast<double>(f);
+      }
+      frame.set_atoms(atoms);
+      REQUIRE(writer.write_frame(frame));
+    }
+    writer.finalise();
+  }
+
+  std::vector<std::vector<trajan::core::Atom>> all_atoms;
+  {
+    trajan::io::XYZHandler reader;
+    reader.set_file_path(temp);
+    reader.initialise(trajan::io::FileHandler::Mode::Read);
+
+    trajan::core::Frame frame;
+    while (reader.read_frame(frame)) {
+      all_atoms.push_back(frame.atoms());
+    }
+    reader.finalise();
+  }
+
+  REQUIRE(all_atoms.size() == 3);
+  for (int f = 0; f < 3; ++f) {
+    REQUIRE(all_atoms[f].size() == 3);
+    REQUIRE_THAT(all_atoms[f][0].x,
+                 Catch::Matchers::WithinAbs(0.0 + f, 1e-5));
+    REQUIRE_THAT(all_atoms[f][1].x,
+                 Catch::Matchers::WithinAbs(0.960 + f, 1e-5));
+  }
+
+  fs::remove(temp);
+}
+
+TEST_CASE("XYZ via Trajectory - single frame", "[unit][io][xyz][trajectory]") {
+  fs::path temp_write = "/tmp/test_traj_xyz_write.xyz";
+  fs::path temp_read  = "/tmp/test_traj_xyz_read.xyz";
+
+  {
+    trajan::io::XYZHandler writer;
+    writer.set_file_path(temp_write);
+    writer.initialise(trajan::io::FileHandler::Mode::Write);
+
+    trajan::core::Frame frame;
+    frame.set_atoms(make_water_atoms());
+    REQUIRE(writer.write_frame(frame));
+    writer.finalise();
+  }
+
+  double ref_x0, ref_x1;
+  {
+    Trajectory traj;
+    traj.load_files({temp_write});
+    REQUIRE(traj.next_frame());
+
+    const auto &atoms = traj.atoms();
+    REQUIRE(atoms.size() == 3);
+    REQUIRE(atoms[0].element.symbol() == "O");
+    REQUIRE(atoms[1].element.symbol() == "H");
+    REQUIRE(atoms[2].element.symbol() == "H");
+    REQUIRE_THAT(atoms[0].x, Catch::Matchers::WithinAbs(0.000, 1e-5));
+    REQUIRE_THAT(atoms[1].x, Catch::Matchers::WithinAbs(0.960, 1e-5));
+    ref_x0 = atoms[0].x;
+    ref_x1 = atoms[1].x;
+
+    traj.set_output_file(temp_read);
+    traj.write_frame();
+    // traj destructor flushes and closes the output file
+  }
+
+  Trajectory traj2;
+  traj2.load_files({temp_read});
+  REQUIRE(traj2.next_frame());
+  const auto &atoms2 = traj2.atoms();
+  REQUIRE(atoms2.size() == 3);
+  REQUIRE(atoms2[0].element.symbol() == "O");
+  REQUIRE_THAT(atoms2[0].x, Catch::Matchers::WithinAbs(ref_x0, 1e-5));
+  REQUIRE_THAT(atoms2[1].x, Catch::Matchers::WithinAbs(ref_x1, 1e-5));
+
+  fs::remove(temp_write);
+  fs::remove(temp_read);
+}
+
+TEST_CASE("XYZ via Trajectory - multi-frame with unit cell",
+          "[unit][io][xyz][trajectory]") {
+  fs::path temp = "/tmp/test_traj_xyz_uc.xyz";
+  constexpr int n_frames = 5;
+  constexpr double a = 20.0, b = 20.0, c = 20.0;
+
+  {
+    trajan::io::XYZHandler writer;
+    writer.set_file_path(temp);
+    writer.initialise(trajan::io::FileHandler::Mode::Write);
+
+    auto uc = occ::crystal::triclinic_cell(a, b, c,
+                                           occ::units::radians(90.0),
+                                           occ::units::radians(90.0),
+                                           occ::units::radians(90.0));
+    for (int f = 0; f < n_frames; ++f) {
+      trajan::core::Frame frame;
+      auto atoms = make_water_atoms();
+      for (auto &atom : atoms) {
+        atom.x += 0.1 * f;
+      }
+      frame.set_atoms(atoms);
+      frame.set_unit_cell(uc);
+      REQUIRE(writer.write_frame(frame));
+    }
+    writer.finalise();
+  }
+
+  Trajectory traj;
+  traj.load_files({temp});
+
+  std::vector<double> ox_positions;
+  while (traj.next_frame()) {
+    ox_positions.push_back(traj.atoms()[0].x);
+    REQUIRE(traj.unit_cell().has_value());
+    REQUIRE_THAT(traj.unit_cell().value().a(),
+                 Catch::Matchers::WithinAbs(a, 1e-4));
+  }
+
+  REQUIRE(static_cast<int>(ox_positions.size()) == n_frames);
+  for (int f = 0; f < n_frames; ++f) {
+    REQUIRE_THAT(ox_positions[f],
+                 Catch::Matchers::WithinAbs(0.1 * f, 1e-5));
+  }
+
+  fs::remove(temp);
+}
+
+TEST_CASE("XYZ file - truncated atom list is rejected", "[unit][io][xyz]") {
+  fs::path temp = "/tmp/test_xyz_corrupt.xyz";
+  {
+    std::ofstream f(temp);
+    f << "5\n";
+    f << "comment\n";
+    f << "C 0.0 0.0 0.0\n";
+    f << "H 1.1 0.0 0.0\n";
+    f << "H -0.4 1.0 0.0\n";
+    // only 3 of 5 claimed atoms
+  }
+
+  trajan::io::XYZHandler reader;
+  reader.set_file_path(temp);
+  reader.initialise(trajan::io::FileHandler::Mode::Read);
+
+  trajan::core::Frame frame;
+  REQUIRE_FALSE(reader.read_frame(frame));
+  reader.finalise();
+
+  fs::remove(temp);
+}
+
+TEST_CASE("XYZ file - diverse element symbols preserved", "[unit][io][xyz]") {
+  fs::path temp = "/tmp/test_xyz_elements.xyz";
+  {
+    std::ofstream f(temp);
+    f << "5\n";
+    f << "Properties=species:S:1:pos:R:3\n";
+    f << "C  0.0 0.0 0.0\n";
+    f << "N  1.3 0.0 0.0\n";
+    f << "O  2.5 0.0 0.0\n";
+    f << "Fe 3.8 0.0 0.0\n";
+    f << "Cl 5.1 0.0 0.0\n";
+  }
+
+  trajan::core::Frame frame;
+  trajan::io::XYZHandler reader;
+  reader.set_file_path(temp);
+  reader.initialise(trajan::io::FileHandler::Mode::Read);
+  REQUIRE(reader.read_frame(frame));
+  reader.finalise();
+
+  REQUIRE(frame.num_atoms() == 5);
+  const auto &atoms = frame.atoms();
+  REQUIRE(atoms[0].element.symbol() == "C");
+  REQUIRE(atoms[1].element.symbol() == "N");
+  REQUIRE(atoms[2].element.symbol() == "O");
+  REQUIRE(atoms[3].element.symbol() == "Fe");
+  REQUIRE(atoms[4].element.symbol() == "Cl");
+  REQUIRE_THAT(atoms[3].x, Catch::Matchers::WithinAbs(3.8, 1e-5));
+
+  fs::remove(temp);
+}
+
+// ── XTC tests (self-contained, no external test data needed) ─────────────────
+//
+// XTC stores coordinates in nm as float32 with lossy compression.
+// With default precision=1000, the rounding error is ~0.5/1000 nm = 0.0005 nm
+// = 0.005 Å.  A tolerance of 0.02 Å covers this comfortably.
+// Box vectors are stored as raw float32 (no compression), so their tolerance
+// is tighter (~1e-4 Å for typical box sizes).
+
+static constexpr double XTC_COORD_TOL = 0.02;   // Angstroms
+static constexpr double XTC_BOX_TOL   = 1e-3;   // Angstroms
+
+// Helper: write a temp PDB so Trajectory has topology when loading XTC.
+static fs::path write_topology_pdb(const fs::path &path,
+                                   const std::vector<trajan::core::Atom> &atoms) {
+  trajan::io::PDBHandler writer;
+  writer.set_file_path(path);
+  writer.initialise(trajan::io::FileHandler::Mode::Write);
+  trajan::core::Frame frame;
+  frame.set_atoms(atoms);
+  writer.write_frame(frame);
+  writer.finalise();
+  return path;
+}
+
+TEST_CASE("XTC write/read round-trip - single frame, no unit cell",
+          "[unit][io][xtc]") {
+  fs::path temp = "/tmp/test_xtc_single.xtc";
+  auto ref_atoms = make_water_atoms();
+
+  // Write
+  {
+    trajan::io::XTCHandler writer;
+    writer.set_file_path(temp);
+    writer.initialise(trajan::io::FileHandler::Mode::Write);
+
+    trajan::core::Frame frame;
+    frame.set_atoms(ref_atoms);
+    REQUIRE(writer.write_frame(frame));
+    writer.finalise();
+  }
+
+  // Read back: pre-populate frame with atoms so update_atom_position works
+  trajan::core::Frame frame;
+  frame.set_atoms(ref_atoms);
+
+  trajan::io::XTCHandler reader;
+  reader.set_file_path(temp);
+  reader.initialise(trajan::io::FileHandler::Mode::Read);
+  REQUIRE(reader.read_frame(frame));
+
+  // Positions should survive the nm round-trip within XTC tolerance
+  const auto &atoms = frame.atoms();
+  REQUIRE(atoms.size() == 3);
+  REQUIRE_THAT(atoms[0].x, Catch::Matchers::WithinAbs(ref_atoms[0].x, XTC_COORD_TOL));
+  REQUIRE_THAT(atoms[0].y, Catch::Matchers::WithinAbs(ref_atoms[0].y, XTC_COORD_TOL));
+  REQUIRE_THAT(atoms[0].z, Catch::Matchers::WithinAbs(ref_atoms[0].z, XTC_COORD_TOL));
+  REQUIRE_THAT(atoms[1].x, Catch::Matchers::WithinAbs(ref_atoms[1].x, XTC_COORD_TOL));
+  REQUIRE_THAT(atoms[2].x, Catch::Matchers::WithinAbs(ref_atoms[2].x, XTC_COORD_TOL));
+  REQUIRE_THAT(atoms[2].y, Catch::Matchers::WithinAbs(ref_atoms[2].y, XTC_COORD_TOL));
+
+  // Second read returns false (only one frame written)
+  trajan::core::Frame frame2;
+  frame2.set_atoms(ref_atoms);
+  REQUIRE_FALSE(reader.read_frame(frame2));
+  reader.finalise();
+
+  fs::remove(temp);
+}
+
+TEST_CASE("XTC write/read round-trip - single frame, cubic unit cell",
+          "[unit][io][xtc]") {
+  fs::path temp = "/tmp/test_xtc_uc.xtc";
+  auto ref_atoms = make_water_atoms();
+  constexpr double box_a = 20.0; // Angstroms
+
+  {
+    trajan::io::XTCHandler writer;
+    writer.set_file_path(temp);
+    writer.initialise(trajan::io::FileHandler::Mode::Write);
+
+    trajan::core::Frame frame;
+    frame.set_atoms(ref_atoms);
+    auto uc = occ::crystal::triclinic_cell(box_a, box_a, box_a,
+                                           occ::units::radians(90.0),
+                                           occ::units::radians(90.0),
+                                           occ::units::radians(90.0));
+    frame.set_unit_cell(uc);
+    REQUIRE(writer.write_frame(frame));
+    writer.finalise();
+  }
+
+  trajan::core::Frame frame;
+  frame.set_atoms(ref_atoms);
+
+  trajan::io::XTCHandler reader;
+  reader.set_file_path(temp);
+  reader.initialise(trajan::io::FileHandler::Mode::Read);
+  REQUIRE(reader.read_frame(frame));
+  reader.finalise();
+
+  REQUIRE(frame.has_unit_cell());
+  const auto &uc = frame.unit_cell().value();
+  REQUIRE_THAT(uc.a(), Catch::Matchers::WithinAbs(box_a, XTC_BOX_TOL));
+  REQUIRE_THAT(uc.b(), Catch::Matchers::WithinAbs(box_a, XTC_BOX_TOL));
+  REQUIRE_THAT(uc.c(), Catch::Matchers::WithinAbs(box_a, XTC_BOX_TOL));
+  REQUIRE_THAT(occ::units::degrees(uc.alpha()),
+               Catch::Matchers::WithinAbs(90.0, 1e-3));
+  REQUIRE_THAT(occ::units::degrees(uc.beta()),
+               Catch::Matchers::WithinAbs(90.0, 1e-3));
+  REQUIRE_THAT(occ::units::degrees(uc.gamma()),
+               Catch::Matchers::WithinAbs(90.0, 1e-3));
+
+  fs::remove(temp);
+}
+
+TEST_CASE("XTC write/read round-trip - triclinic unit cell",
+          "[unit][io][xtc]") {
+  fs::path temp = "/tmp/test_xtc_triclinic.xtc";
+  auto ref_atoms = make_water_atoms();
+  constexpr double a = 15.0, b = 16.0, c = 17.0;
+  const double alpha = occ::units::radians(80.0);
+  const double beta  = occ::units::radians(85.0);
+  const double gamma = occ::units::radians(75.0);
+
+  {
+    trajan::io::XTCHandler writer;
+    writer.set_file_path(temp);
+    writer.initialise(trajan::io::FileHandler::Mode::Write);
+
+    trajan::core::Frame frame;
+    frame.set_atoms(ref_atoms);
+    auto uc = occ::crystal::triclinic_cell(a, b, c, alpha, beta, gamma);
+    frame.set_unit_cell(uc);
+    REQUIRE(writer.write_frame(frame));
+    writer.finalise();
+  }
+
+  trajan::core::Frame frame;
+  frame.set_atoms(ref_atoms);
+
+  trajan::io::XTCHandler reader;
+  reader.set_file_path(temp);
+  reader.initialise(trajan::io::FileHandler::Mode::Read);
+  REQUIRE(reader.read_frame(frame));
+  reader.finalise();
+
+  REQUIRE(frame.has_unit_cell());
+  const auto &uc = frame.unit_cell().value();
+  REQUIRE_THAT(uc.a(), Catch::Matchers::WithinAbs(a, XTC_BOX_TOL));
+  REQUIRE_THAT(uc.b(), Catch::Matchers::WithinAbs(b, XTC_BOX_TOL));
+  REQUIRE_THAT(uc.c(), Catch::Matchers::WithinAbs(c, XTC_BOX_TOL));
+  REQUIRE_THAT(occ::units::degrees(uc.alpha()),
+               Catch::Matchers::WithinAbs(80.0, 1e-2));
+  REQUIRE_THAT(occ::units::degrees(uc.beta()),
+               Catch::Matchers::WithinAbs(85.0, 1e-2));
+  REQUIRE_THAT(occ::units::degrees(uc.gamma()),
+               Catch::Matchers::WithinAbs(75.0, 1e-2));
+
+  fs::remove(temp);
+}
+
+TEST_CASE("XTC multi-frame write/read round-trip", "[unit][io][xtc]") {
+  fs::path temp = "/tmp/test_xtc_multi.xtc";
+  constexpr int n_frames = 4;
+  auto ref_atoms = make_water_atoms();
+
+  // Write n_frames frames with linearly displaced O atom
+  {
+    trajan::io::XTCHandler writer;
+    writer.set_file_path(temp);
+    writer.initialise(trajan::io::FileHandler::Mode::Write);
+
+    for (int f = 0; f < n_frames; ++f) {
+      trajan::core::Frame frame;
+      auto atoms = make_water_atoms();
+      for (auto &atom : atoms) {
+        atom.x += 0.5 * f; // 0.5 Å shift per frame
+        atom.y += 0.3 * f;
+      }
+      frame.set_atoms(atoms);
+      REQUIRE(writer.write_frame(frame));
+    }
+    writer.finalise();
+  }
+
+  // Read all frames back
+  std::vector<double> ox_x, ox_y;
+  {
+    trajan::io::XTCHandler reader;
+    reader.set_file_path(temp);
+    reader.initialise(trajan::io::FileHandler::Mode::Read);
+
+    trajan::core::Frame frame;
+    frame.set_atoms(ref_atoms); // pre-load atom metadata
+    while (reader.read_frame(frame)) {
+      ox_x.push_back(frame.atoms()[0].x);
+      ox_y.push_back(frame.atoms()[0].y);
+    }
+    reader.finalise();
+  }
+
+  REQUIRE(static_cast<int>(ox_x.size()) == n_frames);
+  for (int f = 0; f < n_frames; ++f) {
+    REQUIRE_THAT(ox_x[f],
+                 Catch::Matchers::WithinAbs(0.0 + 0.5 * f, XTC_COORD_TOL));
+    REQUIRE_THAT(ox_y[f],
+                 Catch::Matchers::WithinAbs(0.0 + 0.3 * f, XTC_COORD_TOL));
+  }
+
+  fs::remove(temp);
+}
+
+TEST_CASE("XTC via Trajectory - PDB topology + XTC coordinates",
+          "[unit][io][xtc][trajectory]") {
+  fs::path temp_pdb = "/tmp/test_xtc_traj.pdb";
+  fs::path temp_xtc = "/tmp/test_xtc_traj.xtc";
+  constexpr int n_frames = 3;
+  auto ref_atoms = make_water_atoms();
+
+  write_topology_pdb(temp_pdb, ref_atoms);
+
+  // Write XTC frames with known positions
+  {
+    trajan::io::XTCHandler writer;
+    writer.set_file_path(temp_xtc);
+    writer.initialise(trajan::io::FileHandler::Mode::Write);
+
+    auto uc = occ::crystal::triclinic_cell(25.0, 25.0, 25.0,
+                                           occ::units::radians(90.0),
+                                           occ::units::radians(90.0),
+                                           occ::units::radians(90.0));
+    for (int f = 0; f < n_frames; ++f) {
+      trajan::core::Frame frame;
+      auto atoms = make_water_atoms();
+      for (auto &atom : atoms) {
+        atom.x += 1.0 * f;
+      }
+      frame.set_atoms(atoms);
+      frame.set_unit_cell(uc);
+      REQUIRE(writer.write_frame(frame));
+    }
+    writer.finalise();
+  }
+
+  // Load via Trajectory (PDB provides topology, XTC provides coordinates)
+  Trajectory traj;
+  traj.load_files({temp_pdb, temp_xtc});
+
+  // First next_frame() reads PDB topology (atom types/connectivity, no unit cell)
+  REQUIRE(traj.next_frame());
+  REQUIRE(traj.atoms().size() == 3);
+
+  // Subsequent next_frame() calls read XTC coordinate frames
+  std::vector<double> ox_x;
+  while (traj.next_frame()) {
+    ox_x.push_back(traj.atoms()[0].x);
+    REQUIRE(traj.atoms().size() == 3);
+    REQUIRE(traj.unit_cell().has_value());
+    REQUIRE_THAT(traj.unit_cell().value().a(),
+                 Catch::Matchers::WithinAbs(25.0, XTC_BOX_TOL));
+  }
+
+  REQUIRE(static_cast<int>(ox_x.size()) == n_frames);
+  for (int f = 0; f < n_frames; ++f) {
+    REQUIRE_THAT(ox_x[f],
+                 Catch::Matchers::WithinAbs(0.0 + 1.0 * f, XTC_COORD_TOL));
+  }
+
+  fs::remove(temp_pdb);
+  fs::remove(temp_xtc);
+}
+
+TEST_CASE("XTC via Trajectory - write output from PDB+XTC, re-read",
+          "[unit][io][xtc][trajectory]") {
+  fs::path temp_pdb  = "/tmp/test_xtc_rewrite.pdb";
+  fs::path temp_xtc  = "/tmp/test_xtc_rewrite.xtc";
+  fs::path temp_xtc2 = "/tmp/test_xtc_rewrite2.xtc";
+  auto ref_atoms = make_water_atoms();
+
+  write_topology_pdb(temp_pdb, ref_atoms);
+
+  // Write a 2-frame XTC
+  {
+    trajan::io::XTCHandler writer;
+    writer.set_file_path(temp_xtc);
+    writer.initialise(trajan::io::FileHandler::Mode::Write);
+    for (int f = 0; f < 2; ++f) {
+      trajan::core::Frame frame;
+      auto atoms = make_water_atoms();
+      for (auto &atom : atoms) atom.x += 2.0 * f;
+      frame.set_atoms(atoms);
+      REQUIRE(writer.write_frame(frame));
+    }
+    writer.finalise();
+  }
+
+  // Read via Trajectory, write each XTC frame out as a second XTC
+  // (first next_frame() loads PDB topology and is not written)
+  {
+    Trajectory traj;
+    traj.load_files({temp_pdb, temp_xtc});
+    traj.set_output_file(temp_xtc2);
+    REQUIRE(traj.next_frame()); // load PDB topology, skip writing
+    while (traj.next_frame()) {
+      traj.write_frame();
+    }
+    // traj destructor flushes and closes temp_xtc2
+  }
+
+  // Re-read the rewritten XTC
+  std::vector<double> ox_x;
+  {
+    trajan::io::XTCHandler reader;
+    reader.set_file_path(temp_xtc2);
+    reader.initialise(trajan::io::FileHandler::Mode::Read);
+
+    trajan::core::Frame frame;
+    frame.set_atoms(ref_atoms);
+    while (reader.read_frame(frame)) {
+      ox_x.push_back(frame.atoms()[0].x);
+    }
+    reader.finalise();
+  }
+
+  REQUIRE(ox_x.size() == 2);
+  REQUIRE_THAT(ox_x[0], Catch::Matchers::WithinAbs(0.0, XTC_COORD_TOL));
+  REQUIRE_THAT(ox_x[1], Catch::Matchers::WithinAbs(2.0, XTC_COORD_TOL));
+
+  fs::remove(temp_pdb);
+  fs::remove(temp_xtc);
+  fs::remove(temp_xtc2);
+}
+
+TEST_CASE_METHOD(TestFixture, "XTC Read - external test file",
+                 "[file][io][xtc]") {
+  // Uses the md.xtc from the libxtc examples if available via --data-path,
+  // otherwise skips.  Checks basic frame iteration and atom count consistency.
+  fs::path xtc_file = this->get_test_file("md.xtc");
+  fs::path pdb_file = this->get_test_file("md.pdb");
+
+  // Need both topology and trajectory
+  if (!fs::exists(pdb_file)) {
+    SKIP("md.pdb not found alongside md.xtc — skipping external XTC test");
+  }
+
+  Trajectory traj;
+  traj.load_files({pdb_file, xtc_file});
+
+  size_t frame_count = 0;
+  size_t natoms = 0;
+  while (traj.next_frame()) {
+    if (frame_count == 0) {
+      natoms = traj.atoms().size();
+      REQUIRE(natoms > 0);
+    } else {
+      REQUIRE(traj.atoms().size() == natoms);
+    }
+    ++frame_count;
+  }
+  REQUIRE(frame_count > 0);
 }
