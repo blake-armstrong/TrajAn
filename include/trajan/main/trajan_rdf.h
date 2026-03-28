@@ -18,6 +18,7 @@ struct RDFOpts {
   double rcut = 6.0;
   int nbins = 100;
   std::string raw_sel1, raw_sel2;
+  io::MolOrigin mol_origin{io::MolOrigin::CenterOfMass};
 };
 
 struct RDFResult {

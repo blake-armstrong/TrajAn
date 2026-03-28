@@ -2,6 +2,7 @@
 
 #include "spdlog/common.h"
 #include <algorithm>
+#include <memory>
 #include <optional>
 #include <string>
 #include <trajan/core/atom.h>
@@ -61,6 +62,61 @@ struct MoleculeTypeSelection : public Selection<std::string> {
 using SelectionCriteria =
     std::variant<AtomIndexSelection, AtomTypeSelection, MoleculeIndexSelection,
                  MoleculeTypeSelection>;
+
+// ── Position predicate ────────────────────────────────────────────────────────
+
+enum class Axis { X, Y, Z };
+enum class CompOp { LT, LE, GT, GE };
+
+struct PositionPredicate {
+  Axis axis;
+  CompOp op;
+  double value;
+
+  bool evaluate(double v) const noexcept {
+    switch (op) {
+    case CompOp::LT: return v < value;
+    case CompOp::LE: return v <= value;
+    case CompOp::GT: return v > value;
+    case CompOp::GE: return v >= value;
+    }
+    return false;
+  }
+};
+
+// Which reference point to use when applying position predicates to molecules.
+enum class MolOrigin { CenterOfMass, Centroid };
+
+// ── Selection expression AST ──────────────────────────────────────────────────
+
+struct SelectionExpr;
+
+// Leaf: one or more existing criteria (e.g. "aO,N" → AtomTypeSelection{"O","N"})
+struct CriteriaLeaf {
+  std::vector<SelectionCriteria> criteria;
+};
+
+// Leaf: a single position predicate (e.g. "z > 40")
+struct PositionLeaf {
+  PositionPredicate pred;
+};
+
+struct AndExpr {
+  std::shared_ptr<SelectionExpr> lhs, rhs;
+};
+struct OrExpr {
+  std::shared_ptr<SelectionExpr> lhs, rhs;
+};
+struct NotExpr {
+  std::shared_ptr<SelectionExpr> operand;
+};
+
+using SelectionNode =
+    std::variant<CriteriaLeaf, PositionLeaf, AndExpr, OrExpr, NotExpr>;
+
+struct SelectionExpr {
+  SelectionNode node;
+};
 
 template <typename T> struct SelectionTraits {};
 
@@ -129,6 +185,8 @@ public:
   static std::optional<std::vector<SelectionCriteria>>
   parse(const std::string &input);
 
+  static SelectionExpr parse_expr(const std::string &input);
+
 private:
   template <typename SelectionType>
   static std::optional<SelectionCriteria>
@@ -171,5 +229,14 @@ void print_parsed_selection(const std::vector<SelectionCriteria> &result);
 std::vector<SelectionCriteria> selection_validator(
     const std::string &input,
     std::optional<std::vector<char>> restrictions = std::nullopt);
+
+// Expression-based selection (supports position predicates and boolean ops).
+void process_selection(const SelectionExpr &expr,
+                       const std::vector<Atom> &atoms,
+                       const std::vector<Molecule> &molecules,
+                       std::vector<core::EntityVariant> &entities,
+                       MolOrigin mol_origin = MolOrigin::CenterOfMass);
+
+SelectionExpr selection_expr_validator(const std::string &input);
 
 } // namespace trajan::io

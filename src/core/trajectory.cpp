@@ -220,6 +220,48 @@ Trajectory::get_entities(const std::vector<io::SelectionCriteria> &selections) {
   return entities;
 }
 
+std::vector<EntityVariant>
+Trajectory::get_entities(const io::SelectionExpr &expr,
+                          io::MolOrigin mol_origin) {
+  const std::vector<Atom> &atoms = this->atoms();
+  std::vector<Molecule> molecules;
+  std::vector<core::EntityVariant> entities;
+  entities.reserve(atoms.size());
+
+  // Walk the expression tree to decide if molecules are needed.
+  std::function<bool(const io::SelectionExpr &)> needs_molecules =
+      [&](const io::SelectionExpr &e) -> bool {
+    return std::visit(
+        [&](const auto &node) -> bool {
+          using T = std::decay_t<decltype(node)>;
+          if constexpr (std::is_same_v<T, io::CriteriaLeaf>) {
+            for (const auto &c : node.criteria) {
+              if (std::holds_alternative<io::MoleculeIndexSelection>(c) ||
+                  std::holds_alternative<io::MoleculeTypeSelection>(c))
+                return true;
+            }
+            return false;
+          } else if constexpr (std::is_same_v<T, io::PositionLeaf>) {
+            return false;
+          } else if constexpr (std::is_same_v<T, io::AndExpr> ||
+                               std::is_same_v<T, io::OrExpr>) {
+            return needs_molecules(*node.lhs) || needs_molecules(*node.rhs);
+          } else if constexpr (std::is_same_v<T, io::NotExpr>) {
+            return needs_molecules(*node.operand);
+          }
+          return false;
+        },
+        e.node);
+  };
+
+  if (needs_molecules(expr)) {
+    molecules = this->get_molecules();
+  }
+
+  io::process_selection(expr, atoms, molecules, entities, mol_origin);
+  return entities;
+}
+
 void Trajectory::update_entities(std::vector<EntityVariant> &entities) {
   io::update_entities_with_positions(entities, this->atoms(),
                                      this->get_molecules());

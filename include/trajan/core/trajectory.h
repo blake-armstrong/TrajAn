@@ -74,6 +74,9 @@ public:
   get_entities(const io::SelectionCriteria &selection);
   std::vector<EntityVariant>
   get_entities(const std::vector<io::SelectionCriteria> &selections);
+  std::vector<EntityVariant>
+  get_entities(const io::SelectionExpr &expr,
+               io::MolOrigin mol_origin = io::MolOrigin::CenterOfMass);
   void update_entities(std::vector<EntityVariant> &entities);
   inline const std::vector<Atom> &atoms() const { return m_frame.atoms(); }
   inline const std::vector<Atom> &get_atoms() const { return m_frame.atoms(); }

@@ -40,8 +40,8 @@ void run_rdf_subcommand(const RDFOpts &opts, Trajectory &traj,
     rdf.r[i] = ri;
   }
 
-  auto parsed_sel1 = io::selection_validator(opts.raw_sel1);
-  auto parsed_sel2 = io::selection_validator(opts.raw_sel2);
+  auto parsed_sel1 = io::selection_expr_validator(opts.raw_sel1);
+  auto parsed_sel2 = io::selection_expr_validator(opts.raw_sel2);
 
   core::NeighbourList nl(opts.rcut);
 
@@ -53,8 +53,8 @@ void run_rdf_subcommand(const RDFOpts &opts, Trajectory &traj,
   while (traj.next_frame()) {
     pipeline.apply(traj.frame());
     if (frame_count == 0 || traj.topology_has_changed()) {
-      entities1 = traj.get_entities(parsed_sel1);
-      entities2 = traj.get_entities(parsed_sel2);
+      entities1 = traj.get_entities(parsed_sel1, opts.mol_origin);
+      entities2 = traj.get_entities(parsed_sel2, opts.mol_origin);
     } else {
       traj.update_entities(entities1);
       traj.update_entities(entities2);
@@ -126,7 +126,15 @@ CLI::App *add_rdf_subcommand(CLI::App &app, Trajectory &traj,
   rdf->add_option("--s2,--sel2", opts->raw_sel2,
                   fmt::format("Second selection (same format as {})", sel1))
       ->required();
-  // ->check(io::selection_validator(opts->parsed_sel2));
+
+  rdf->add_option(
+         "--mol-origin", opts->mol_origin,
+         "Reference position for molecule selections: com or centroid")
+      ->transform(CLI::CheckedTransformer(
+          std::map<std::string, io::MolOrigin>{
+              {"com", io::MolOrigin::CenterOfMass},
+              {"centroid", io::MolOrigin::Centroid}}))
+      ->capture_default_str();
 
   rdf->callback([opts, &traj, &pipeline]() {
     trajan::log::set_subcommand_log_pattern("rdf");
