@@ -38,16 +38,16 @@ spdlog::level::level_enum verbosity_to_level(int verbosity) {
   }
 }
 
-std::string level_to_pattern(spdlog::level::level_enum &n) {
+std::string level_to_pattern(spdlog::level::level_enum n) {
   switch (n) {
   case spdlog::level::trace:
     return PATTERN_VERBOSE;
   case spdlog::level::debug:
     return PATTERN_VERBOSE;
   case spdlog::level::warn:
-    return PATTERN_SIMPLE;
+    return PATTERN_WARN;
   case spdlog::level::critical:
-    return PATTERN_SIMPLE;
+    return PATTERN_WARN;
   default:
     return PATTERN_SIMPLE;
   }
@@ -58,6 +58,7 @@ void set_log_level(spdlog::level::level_enum level) {
   m_currentlogger->set_level(level);
   std::string pattern = level_to_pattern(level);
   spdlog::set_pattern(pattern);
+  spdlog::flush_on(spdlog::level::warn);
   spdlog::enable_backtrace(32);
 }
 
@@ -66,6 +67,7 @@ void set_log_level(const std::string &verbosity) {
   m_currentlogger->set_level(level);
   std::string pattern = level_to_pattern(level);
   spdlog::set_pattern(pattern);
+  spdlog::flush_on(spdlog::level::warn);
   spdlog::enable_backtrace(32);
 }
 
@@ -74,33 +76,41 @@ void set_log_level(int verbosity) {
   m_currentlogger->set_level(level);
   std::string pattern = level_to_pattern(level);
   spdlog::set_pattern(pattern);
+  spdlog::flush_on(spdlog::level::warn);
   spdlog::enable_backtrace(32);
 }
 
 void set_log_file(const std::string &filename) {
+  // Save the current level before reassigning m_currentlogger.
+  auto prev_level = m_currentlogger->level();
   try {
     auto file_logger = spdlog::basic_logger_mt("trajan_logger", filename,
                                                true); // true = truncate
+    file_logger->set_level(prev_level);
     m_currentlogger = file_logger;
-    file_logger->set_level(m_currentlogger->level());
     spdlog::set_default_logger(m_currentlogger);
   } catch (const spdlog::spdlog_ex &ex) {
     spdlog::warn(
         "Failed to create file logger: {}. Using existing logger instead.",
         ex.what());
   }
-  spdlog::set_pattern(PATTERN_SIMPLE);
+  spdlog::set_pattern(level_to_pattern(prev_level));
   spdlog::enable_backtrace(32);
 }
 
 void set_subcommand_log_pattern(const std::string &subcommand) {
   auto level = m_currentlogger->level();
   if (level <= spdlog::level::debug) {
-    spdlog::set_pattern(fmt::format("[%H:%M:%S]-[{}]-[%^%l%$] %v", subcommand));
+    spdlog::set_pattern(
+        fmt::format("[%H:%M:%S]-[{}]-[%^%l%$] %v", subcommand));
+  } else if (level == spdlog::level::warn) {
+    spdlog::set_pattern(fmt::format("[{}]-[%^%l%$] %v", subcommand));
+  } else {
+    spdlog::set_pattern(fmt::format("[{}] %v", subcommand));
   }
 }
 
-Progress::Progress(int total, const std::string &label)
+Progress::Progress(int64_t total, const std::string &label)
     : m_label(label), m_current(0), m_total(total), m_last_length(0),
       m_finished(false) {
 
@@ -128,14 +138,14 @@ Progress::~Progress() {
   }
 }
 
-void Progress::update(int current) {
+void Progress::update(int64_t current) {
   m_current = current;
   if (m_enabled && !m_finished) {
     display();
   }
 }
 
-void Progress::update(int current, const std::string &message) {
+void Progress::update(int64_t current, const std::string &message) {
   m_current = current;
   if (m_enabled && !m_finished) {
     display_with_message(message);

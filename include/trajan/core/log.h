@@ -12,6 +12,7 @@ using spdlog::trace;
 using spdlog::warn;
 
 constexpr std::string PATTERN_VERBOSE = "[%H:%M:%S]-[%^%l%$] %v";
+constexpr std::string PATTERN_WARN = "[%^%l%$] %v";
 constexpr std::string PATTERN_SIMPLE = "%v";
 constexpr size_t LINE_WIDTH = 100;
 
@@ -43,7 +44,7 @@ inline void flush_every(std::chrono::seconds interval) {
 
 class Progress {
 public:
-  Progress(int total, const std::string &label = "Progress");
+  Progress(int64_t total, const std::string &label = "Progress");
   explicit Progress(const std::string &label = "Counter");
   ~Progress();
   Progress(const Progress &) = delete;
@@ -51,8 +52,8 @@ public:
   Progress(Progress &&) noexcept = default;
   Progress &operator=(Progress &&) noexcept = default;
 
-  void update(int current);
-  void update(int current, const std::string &message);
+  void update(int64_t current);
+  void update(int64_t current, const std::string &message);
   void increment();
   void finish();
   void finish(const std::string &final_message);
@@ -63,8 +64,8 @@ private:
   void display_with_message(const std::string &message);
 
   std::string m_label;
-  int m_current;
-  int m_total; // -1 means no total (counter mode)
+  int64_t m_current;
+  int64_t m_total; // -1 means no total (counter mode)
   int m_last_length;
   bool m_finished;
   bool m_enabled;

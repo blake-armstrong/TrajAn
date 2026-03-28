@@ -1336,6 +1336,56 @@ TEST_CASE("EnhancedAtom is_bonded reflects covalent radii", "[unit][atom]") {
   REQUIRE_FALSE(c.is_bonded(h_far).has_value());
 }
 
+// ── Logging unit tests ────────────────────────────────────────────────────────
+
+TEST_CASE("Log patterns are distinct", "[unit][log]") {
+  // PATTERN_WARN should carry level information that PATTERN_SIMPLE lacks.
+  REQUIRE(trajan::log::PATTERN_WARN != trajan::log::PATTERN_SIMPLE);
+  // PATTERN_VERBOSE should be distinct from both.
+  REQUIRE(trajan::log::PATTERN_VERBOSE != trajan::log::PATTERN_WARN);
+  REQUIRE(trajan::log::PATTERN_VERBOSE != trajan::log::PATTERN_SIMPLE);
+}
+
+TEST_CASE("set_log_level does not throw", "[unit][log]") {
+  SECTION("Integer levels") {
+    for (int level : {0, 1, 2, 3, 4}) {
+      REQUIRE_NOTHROW(trajan::log::set_log_level(level));
+    }
+    // Restore normal level after test.
+    trajan::log::set_log_level(2);
+  }
+
+  SECTION("String levels") {
+    for (const std::string &level :
+         {"silent", "minimal", "normal", "verbose", "debug"}) {
+      REQUIRE_NOTHROW(trajan::log::set_log_level(level));
+    }
+    trajan::log::set_log_level("normal");
+  }
+}
+
+TEST_CASE("Progress - int64_t total handles large values", "[unit][log]") {
+  // Verify that Progress accepts values beyond int32_t range without overflow.
+  constexpr int64_t large_total = 3'000'000'000LL;
+
+  // Progress is TTY-aware; constructing it should not crash regardless.
+  REQUIRE_NOTHROW([&]() {
+    trajan::log::Progress p(large_total, "Test");
+    p.update(large_total / 2);
+    p.update(large_total - 1);
+    p.finish();
+  }());
+}
+
+TEST_CASE("Progress counter mode (no total) does not crash", "[unit][log]") {
+  REQUIRE_NOTHROW([&]() {
+    trajan::log::Progress p("Counter");
+    p.increment();
+    p.increment();
+    p.finish("done");
+  }());
+}
+
 // ── tests requiring files ─────────────────────────────────────────────────────
 
 TEST_CASE_METHOD(TestFixture, "Trajectory and Topology Integration",
