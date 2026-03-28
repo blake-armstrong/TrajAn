@@ -2,6 +2,7 @@
 
 #include <CLI/CLI.hpp>
 #include <string>
+#include <trajan/core/pipeline.h>
 #include <trajan/core/trajectory.h>
 #include <trajan/io/file_handler.h>
 #include <trajan/io/selection.h>
@@ -9,6 +10,7 @@
 namespace trajan::main {
 
 namespace io = trajan::io;
+using trajan::core::Pipeline;
 using trajan::core::Trajectory;
 
 struct RDFOpts {
@@ -32,7 +34,9 @@ struct RDFResult {
   void normalise_by_count(size_t count);
 };
 
-void run_rdf_subcommand(RDFOpts const &opts, Trajectory &traj);
-CLI::App *add_rdf_subcommand(CLI::App &app, Trajectory &traj);
+void run_rdf_subcommand(RDFOpts const &opts, Trajectory &traj,
+                        const Pipeline &pipeline);
+CLI::App *add_rdf_subcommand(CLI::App &app, Trajectory &traj,
+                             Pipeline &pipeline);
 
 } // namespace trajan::main

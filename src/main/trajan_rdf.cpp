@@ -28,7 +28,8 @@ void RDFResult::normalise_by_count(size_t count) {
   }
 }
 
-void run_rdf_subcommand(const RDFOpts &opts, Trajectory &traj) {
+void run_rdf_subcommand(const RDFOpts &opts, Trajectory &traj,
+                        const Pipeline &pipeline) {
 
   RDFResult rdf(opts.nbins);
   double bin_width = opts.rcut / opts.nbins;
@@ -50,6 +51,7 @@ void run_rdf_subcommand(const RDFOpts &opts, Trajectory &traj) {
 
   size_t frame_count = 0;
   while (traj.next_frame()) {
+    pipeline.apply(traj.frame());
     if (frame_count == 0 || traj.topology_has_changed()) {
       entities1 = traj.get_entities(parsed_sel1);
       entities2 = traj.get_entities(parsed_sel2);
@@ -97,7 +99,8 @@ void run_rdf_subcommand(const RDFOpts &opts, Trajectory &traj) {
   outfile.close();
 }
 
-CLI::App *add_rdf_subcommand(CLI::App &app, Trajectory &traj) {
+CLI::App *add_rdf_subcommand(CLI::App &app, Trajectory &traj,
+                             Pipeline &pipeline) {
   CLI::App *rdf =
       app.add_subcommand("rdf", "Radial Pair Distribution Function");
   auto opts = std::make_shared<RDFOpts>();
@@ -125,9 +128,9 @@ CLI::App *add_rdf_subcommand(CLI::App &app, Trajectory &traj) {
       ->required();
   // ->check(io::selection_validator(opts->parsed_sel2));
 
-  rdf->callback([opts, &traj]() {
+  rdf->callback([opts, &traj, &pipeline]() {
     trajan::log::set_subcommand_log_pattern("rdf");
-    run_rdf_subcommand(*opts, traj);
+    run_rdf_subcommand(*opts, traj, pipeline);
   });
   return rdf;
 }

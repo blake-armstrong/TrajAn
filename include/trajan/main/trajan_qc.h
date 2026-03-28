@@ -4,6 +4,7 @@
 #include <Eigen/src/Geometry/Quaternion.h>
 #include <nlohmann/json.hpp>
 #include <occ/core/linear_algebra.h>
+#include <trajan/core/pipeline.h>
 #include <trajan/core/topology.h>
 #include <trajan/core/trajectory.h>
 
@@ -15,6 +16,7 @@ constexpr double pi = occ::constants::pi<double>;
 using nlohmann::json;
 using trajan::core::Atom;
 using trajan::core::ATOM_RESTRICTIONS;
+using trajan::core::Pipeline;
 using trajan::core::Trajectory;
 
 struct QCOpts {
@@ -65,9 +67,13 @@ std::vector<SurfaceState>
 kmeans_surface_states(const std::vector<SurfaceState> &states, int k,
                       int max_iter = 100);
 
-void run_qc_train(QCOpts const &opts, Trajectory &traj);
-void run_qc_analyse(QCOpts const &opts, Trajectory &traj);
-void run_qc_subcommand(QCOpts const &opts, Trajectory &traj);
-CLI::App *add_qc_subcommand(CLI::App &app, Trajectory &traj);
+void run_qc_train(QCOpts const &opts, Trajectory &traj,
+                  const Pipeline &pipeline);
+void run_qc_analyse(QCOpts const &opts, Trajectory &traj,
+                    const Pipeline &pipeline);
+void run_qc_subcommand(QCOpts const &opts, Trajectory &traj,
+                       const Pipeline &pipeline);
+CLI::App *add_qc_subcommand(CLI::App &app, Trajectory &traj,
+                             Pipeline &pipeline);
 
 } // namespace trajan::main

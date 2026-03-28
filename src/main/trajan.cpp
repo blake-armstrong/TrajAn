@@ -1,13 +1,16 @@
 #include "spdlog/spdlog.h"
 #include <CLI/App.hpp>
 #include <trajan/core/log.h>
+#include <trajan/core/pipeline.h>
 #include <trajan/core/trajectory.h>
 // #include <trajan/main/trajan_opt.h>
 #include <trajan/main/trajan_info.h>
 #include <trajan/main/trajan_load.h>
+#include <trajan/main/trajan_modify.h>
 #include <trajan/main/trajan_qc.h>
 #include <trajan/main/trajan_rdf.h>
 #include <trajan/main/trajan_topology.h>
+#include <trajan/main/trajan_write.h>
 #include <trajan/main/version.h>
 
 int main(int argc, char *argv[]) {
@@ -31,13 +34,19 @@ int main(int argc, char *argv[]) {
       ->default_val(std::thread::hardware_concurrency());
 
   trajan::core::Trajectory trajectory;
+  trajan::core::Pipeline pipeline;
 
   // add all the subcommands here
   auto *load = trajan::main::add_load_subcommand(app, trajectory);
   auto *top = trajan::main::add_topology_subcommand(app, trajectory);
   auto *info = trajan::main::add_info_subcommand(app, trajectory);
-  auto *rdf = trajan::main::add_rdf_subcommand(app, trajectory);
-  auto *qc = trajan::main::add_qc_subcommand(app, trajectory);
+  auto *rdf = trajan::main::add_rdf_subcommand(app, trajectory, pipeline);
+  auto *qc = trajan::main::add_qc_subcommand(app, trajectory, pipeline);
+  auto *modify = trajan::main::add_modify_subcommand(app, trajectory, pipeline);
+  auto *write = trajan::main::add_write_subcommand(app, trajectory, pipeline);
+
+  modify->needs(load);
+  write->needs(load);
 
   // auto *opt = trajan::main::add_opt_subcommand(app);
 

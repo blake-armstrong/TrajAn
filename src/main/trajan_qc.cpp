@@ -509,7 +509,8 @@ void print_surface_configuration(const SurfaceState &state, int config_id) {
   }
 }
 
-void run_qc_train(QCOpts const &opts, Trajectory &traj) {
+void run_qc_train(QCOpts const &opts, Trajectory &traj,
+                  const Pipeline &pipeline) {
   const auto &parsed_sel = io::selection_validator(opts.carbonate_selection,
                                                    core::ATOM_RESTRICTIONS);
 
@@ -521,6 +522,7 @@ void run_qc_train(QCOpts const &opts, Trajectory &traj) {
   int frame_num = 0;
 
   while (traj.next_frame()) {
+    pipeline.apply(traj.frame());
     const auto &carbonates = traj.get_molecules(parsed_sel);
 
     SurfaceState state;
@@ -588,7 +590,8 @@ void run_qc_train(QCOpts const &opts, Trajectory &traj) {
   }
 }
 
-void run_qc_analyse(QCOpts const &opts, Trajectory &traj) {
+void run_qc_analyse(QCOpts const &opts, Trajectory &traj,
+                    const Pipeline &pipeline) {
   const auto &parsed_sel = io::selection_validator(opts.carbonate_selection,
                                                    core::ATOM_RESTRICTIONS);
 
@@ -625,6 +628,7 @@ void run_qc_analyse(QCOpts const &opts, Trajectory &traj) {
   std::vector<int> config_counts(k + 1, 0);
 
   while (traj.next_frame()) {
+    pipeline.apply(traj.frame());
     if (frame_num == 0 || traj.topology_has_changed()) {
       carbonates = traj.get_molecules(parsed_sel);
     } else {
@@ -750,15 +754,17 @@ void run_qc_analyse(QCOpts const &opts, Trajectory &traj) {
   }
 }
 
-void run_qc_subcommand(QCOpts const &opts, Trajectory &traj) {
+void run_qc_subcommand(QCOpts const &opts, Trajectory &traj,
+                       const Pipeline &pipeline) {
   if (opts.train_mode) {
-    run_qc_train(opts, traj);
+    run_qc_train(opts, traj, pipeline);
   } else {
-    run_qc_analyse(opts, traj);
+    run_qc_analyse(opts, traj, pipeline);
   }
 }
 
-CLI::App *add_qc_subcommand(CLI::App &app, Trajectory &traj) {
+CLI::App *add_qc_subcommand(CLI::App &app, Trajectory &traj,
+                             Pipeline &pipeline) {
   CLI::App *qc =
       app.add_subcommand("qc", "Quaternion clustering of carbonates");
   auto opts = std::make_shared<QCOpts>();
@@ -792,9 +798,9 @@ CLI::App *add_qc_subcommand(CLI::App &app, Trajectory &traj) {
                  "Warn if frame distance exceeds this (radians)")
       ->default_val(0.3);
 
-  qc->callback([opts, &traj]() {
+  qc->callback([opts, &traj, &pipeline]() {
     trajan::log::set_subcommand_log_pattern("qc");
-    run_qc_subcommand(*opts, traj);
+    run_qc_subcommand(*opts, traj, pipeline);
   });
   return qc;
 }
