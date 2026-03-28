@@ -225,6 +225,8 @@ TEST_CASE("Selection Parser - Invalid Inputs", "[unit][selection]") {
          {"i-1", "Negative index"},
          {"j-1", "Negative molecule ID"},
          {"aC@#", "Invalid characters in atom type"},
+         {"a*", "Wildcard not supported for atom type"},
+         {"m*", "Wildcard not supported for molecule type"},
          {"", "Empty input"}}));
 
     INFO("Testing: " << description);
@@ -289,6 +291,152 @@ TEST_CASE("Selection Parser - Edge Cases", "[unit][selection]") {
           }
         },
         result->front());
+  }
+}
+
+// Forward declaration — defined later alongside the XYZ tests.
+static std::vector<trajan::core::Atom> make_water_atoms();
+
+// ── selection_validator and process_selection tests ───────────────────────────
+
+TEST_CASE("selection_validator - error message includes input",
+          "[unit][selection]") {
+  SECTION("Bad prefix") {
+    try {
+      trajan::io::selection_validator("BADSEL");
+      FAIL("Expected exception not thrown");
+    } catch (const std::invalid_argument &e) {
+      std::string msg = e.what();
+      REQUIRE(msg.find("BADSEL") != std::string::npos);
+    }
+  }
+
+  SECTION("Malformed range") {
+    try {
+      trajan::io::selection_validator("i5-2");
+      FAIL("Expected exception not thrown");
+    } catch (const std::invalid_argument &e) {
+      std::string msg = e.what();
+      REQUIRE(msg.find("i5-2") != std::string::npos);
+    }
+  }
+}
+
+TEST_CASE("process_selection - atom index selection", "[unit][selection]") {
+  auto atoms = make_water_atoms(); // O(idx=0), H(idx=1), H(idx=2)
+  std::vector<trajan::core::Molecule> molecules;
+
+  SECTION("Single matching atom") {
+    auto sel = trajan::io::selection_validator("i0");
+    std::vector<trajan::core::EntityVariant> entities;
+    trajan::io::process_selection(sel, atoms, molecules, entities);
+    REQUIRE(entities.size() == 1);
+    const auto *atom = std::get_if<trajan::core::Atom>(&entities[0]);
+    REQUIRE(atom != nullptr);
+    CHECK(atom->index == 0);
+  }
+
+  SECTION("Range selects multiple atoms") {
+    auto sel = trajan::io::selection_validator("i0-2");
+    std::vector<trajan::core::EntityVariant> entities;
+    trajan::io::process_selection(sel, atoms, molecules, entities);
+    REQUIRE(entities.size() == 3);
+  }
+
+  SECTION("Non-matching index throws") {
+    auto sel = trajan::io::selection_validator("i99");
+    std::vector<trajan::core::EntityVariant> entities;
+    REQUIRE_THROWS_AS(
+        trajan::io::process_selection(sel, atoms, molecules, entities),
+        std::runtime_error);
+  }
+
+  SECTION("Per-criterion check: second criterion matching nothing still throws") {
+    // First add atoms 0-2 via a prior call so entities is non-empty,
+    // then a new criterion for index 99 should still throw even though
+    // entities is not empty.
+    auto sel_good = trajan::io::selection_validator("i0,1,2");
+    auto sel_bad  = trajan::io::selection_validator("i99");
+    std::vector<trajan::core::EntityVariant> entities;
+    // Populate entities via direct call with good criterion
+    trajan::io::process_selection(sel_good, atoms, molecules, entities);
+    REQUIRE(entities.size() == 3);
+    // Now the bad criterion — entities already has 3 entries, but the bad
+    // criterion itself should throw.
+    REQUIRE_THROWS_AS(
+        trajan::io::process_selection(sel_bad[0], atoms, molecules, entities),
+        std::runtime_error);
+  }
+}
+
+TEST_CASE("process_selection - atom type selection", "[unit][selection]") {
+  auto atoms = make_water_atoms(); // O, H, H
+  std::vector<trajan::core::Molecule> molecules;
+
+  SECTION("Selects by element type") {
+    auto sel = trajan::io::selection_validator("aO");
+    std::vector<trajan::core::EntityVariant> entities;
+    trajan::io::process_selection(sel, atoms, molecules, entities);
+    REQUIRE(entities.size() == 1);
+    const auto *atom = std::get_if<trajan::core::Atom>(&entities[0]);
+    REQUIRE(atom != nullptr);
+    CHECK(atom->type == "O");
+  }
+
+  SECTION("Selects multiple types") {
+    auto sel = trajan::io::selection_validator("aO,H");
+    std::vector<trajan::core::EntityVariant> entities;
+    trajan::io::process_selection(sel, atoms, molecules, entities);
+    CHECK(entities.size() == 3);
+  }
+
+  SECTION("Non-matching type throws") {
+    auto sel = trajan::io::selection_validator("aFe");
+    std::vector<trajan::core::EntityVariant> entities;
+    REQUIRE_THROWS_AS(
+        trajan::io::process_selection(sel, atoms, molecules, entities),
+        std::runtime_error);
+  }
+}
+
+TEST_CASE("process_selection - large atom list correctness",
+          "[unit][selection]") {
+  // Build 1000 atoms with index == position and alternating types "A"/"B"
+  using trajan::core::Atom;
+  using trajan::core::Element;
+  std::vector<Atom> atoms;
+  atoms.reserve(1000);
+  for (int i = 0; i < 1000; ++i) {
+    Atom a(occ::Vec3{double(i), 0.0, 0.0}, Element("C", true), i);
+    a.type = (i % 2 == 0) ? "A" : "B";
+    a.index = i;
+    atoms.push_back(a);
+  }
+  std::vector<trajan::core::Molecule> molecules;
+
+  SECTION("Index range selection returns correct atoms") {
+    auto sel = trajan::io::selection_validator("i10-19");
+    std::vector<trajan::core::EntityVariant> entities;
+    trajan::io::process_selection(sel, atoms, molecules, entities);
+    REQUIRE(entities.size() == 10);
+    for (const auto &ent : entities) {
+      const auto *a = std::get_if<Atom>(&ent);
+      REQUIRE(a != nullptr);
+      CHECK(a->index >= 10);
+      CHECK(a->index <= 19);
+    }
+  }
+
+  SECTION("Type selection returns every-other atom") {
+    auto sel = trajan::io::selection_validator("aA");
+    std::vector<trajan::core::EntityVariant> entities;
+    trajan::io::process_selection(sel, atoms, molecules, entities);
+    REQUIRE(entities.size() == 500);
+    for (const auto &ent : entities) {
+      const auto *a = std::get_if<Atom>(&ent);
+      REQUIRE(a != nullptr);
+      CHECK(a->type == "A");
+    }
   }
 }
 

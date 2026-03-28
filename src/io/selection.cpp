@@ -1,7 +1,9 @@
 #include "trajan/core/neigh.h"
+#include <algorithm>
 #include <string>
 #include <trajan/core/util.h>
 #include <trajan/io/selection.h>
+#include <unordered_set>
 
 namespace trajan::io {
 
@@ -67,46 +69,10 @@ SelectionParser::parse(const std::string &input) {
   std::string current_token;
   char current_prefix = '\0';
 
-  for (size_t i = 0; i < input.length(); i++) {
-    char c = input[i];
-
-    // Check if this is a prefix character
-    if ((c == SelectionTraits<AtomIndexSelection>::prefix ||
-         c == SelectionTraits<AtomTypeSelection>::prefix ||
-         c == SelectionTraits<MoleculeIndexSelection>::prefix ||
-         c == SelectionTraits<MoleculeTypeSelection>::prefix) &&
-        (i == 0 || input[i - 1] == ',')) {
-
-      // Process previous token if exists
-      if (!current_token.empty() && current_prefix != '\0') {
-        std::optional<SelectionCriteria> result;
-        switch (current_prefix) {
-        case SelectionTraits<AtomIndexSelection>::prefix:
-          result = parse_selection<AtomIndexSelection>(current_token);
-          break;
-        case SelectionTraits<AtomTypeSelection>::prefix:
-          result = parse_selection<AtomTypeSelection>(current_token);
-          break;
-        case SelectionTraits<MoleculeIndexSelection>::prefix:
-          result = parse_selection<MoleculeIndexSelection>(current_token);
-          break;
-        case SelectionTraits<MoleculeTypeSelection>::prefix:
-          result = parse_selection<MoleculeTypeSelection>(current_token);
-          break;
-        }
-        if (!result)
-          return std::nullopt;
-        results.push_back(*result);
-        current_token.clear();
-      }
-      current_prefix = c;
-    } else {
-      current_token += c;
-    }
-  }
-
-  // Process final token
-  if (!current_token.empty() && current_prefix != '\0') {
+  // Flush the accumulated token into results. Returns false on parse failure.
+  auto flush_token = [&]() -> bool {
+    if (current_token.empty() || current_prefix == '\0')
+      return true;
     std::optional<SelectionCriteria> result;
     switch (current_prefix) {
     case SelectionTraits<AtomIndexSelection>::prefix:
@@ -121,11 +87,36 @@ SelectionParser::parse(const std::string &input) {
     case SelectionTraits<MoleculeTypeSelection>::prefix:
       result = parse_selection<MoleculeTypeSelection>(current_token);
       break;
+    default:
+      return false;
     }
     if (!result)
-      return std::nullopt;
+      return false;
     results.push_back(*result);
+    current_token.clear();
+    return true;
+  };
+
+  for (size_t i = 0; i < input.length(); i++) {
+    char c = input[i];
+
+    // A prefix character is only recognised at position 0 or after a comma.
+    if ((c == SelectionTraits<AtomIndexSelection>::prefix ||
+         c == SelectionTraits<AtomTypeSelection>::prefix ||
+         c == SelectionTraits<MoleculeIndexSelection>::prefix ||
+         c == SelectionTraits<MoleculeTypeSelection>::prefix) &&
+        (i == 0 || input[i - 1] == ',')) {
+
+      if (!flush_token())
+        return std::nullopt;
+      current_prefix = c;
+    } else {
+      current_token += c;
+    }
   }
+
+  if (!flush_token())
+    return std::nullopt;
 
   return results.empty() ? std::nullopt : std::make_optional(results);
 }
@@ -173,6 +164,7 @@ void process_selection(const SelectionCriteria &selection,
                        const std::vector<Atom> &atoms,
                        const std::vector<Molecule> &molecules,
                        std::vector<core::EntityVariant> &entities) {
+  const size_t entities_before = entities.size();
   std::visit(
       [&](const auto &sel) {
         using SelType = std::decay_t<decltype(sel)>;
@@ -183,24 +175,25 @@ void process_selection(const SelectionCriteria &selection,
           trajan::log::debug(
               "The following atoms have been idenitified from {}:", sel.name());
           trajan::log::debug(" NB: atoms are only printed if log level is 4.");
+          // sel.data is sorted; use binary search for O(n log k) vs O(nk)
           for (const Atom &atom : atoms) {
-            for (const int &ai : sel) {
-              if (atom.index == ai) {
-                entities.push_back(atom);
-                trajan::log::trace(" {}", atom.repr());
-              }
+            if (std::binary_search(sel.data.begin(), sel.data.end(),
+                                   atom.index)) {
+              entities.push_back(atom);
+              trajan::log::trace(" {}", atom.repr());
             }
           }
         } else if constexpr (std::is_same_v<SelType, io::AtomTypeSelection>) {
           trajan::log::debug(
               "The following atoms have been idenitified from {}:", sel.name());
           trajan::log::debug(" NB: atoms are only printed if log level is 4.");
+          // Build a set once for O(n) lookup across all atoms
+          const std::unordered_set<std::string> type_set(sel.data.begin(),
+                                                         sel.data.end());
           for (const Atom &atom : atoms) {
-            for (const std::string &at : sel) {
-              if (atom.type == at) {
-                entities.push_back(atom);
-                trajan::log::trace(" {}", atom.repr());
-              }
+            if (type_set.count(atom.type)) {
+              entities.push_back(atom);
+              trajan::log::trace(" {}", atom.repr());
             }
           }
         } else if constexpr (std::is_same_v<SelType,
@@ -209,12 +202,12 @@ void process_selection(const SelectionCriteria &selection,
               "The following molecules have been idenitified from {}:",
               sel.name());
           trajan::log::debug(" NB: atoms are only printed if log level is 4.");
+          // sel.data is sorted; use binary search
           for (const Molecule &molecule : molecules) {
-            for (const int &mi : sel) {
-              if (molecule.index == mi) {
-                entities.push_back(molecule);
-                trajan::log::trace("  {}", molecule.repr());
-              }
+            if (std::binary_search(sel.data.begin(), sel.data.end(),
+                                   molecule.index)) {
+              entities.push_back(molecule);
+              trajan::log::trace("  {}", molecule.repr());
             }
           }
         } else if constexpr (std::is_same_v<SelType,
@@ -223,22 +216,25 @@ void process_selection(const SelectionCriteria &selection,
               "The following molecules have been idenitified from {}:",
               sel.name());
           trajan::log::debug(" NB: atoms are only printed if log level is 4.");
+          // Build a set once for O(n) lookup
+          const std::unordered_set<std::string> type_set(sel.data.begin(),
+                                                         sel.data.end());
           for (const Molecule &molecule : molecules) {
-            for (const std::string &mt : sel) {
-              if (molecule.type == mt) {
-                entities.push_back(molecule);
-                trajan::log::trace("  {}", molecule.repr());
-              }
+            if (type_set.count(molecule.type)) {
+              entities.push_back(molecule);
+              trajan::log::trace("  {}", molecule.repr());
             }
           }
         }
-        size_t num_entities = entities.size();
-        if (num_entities == 0) {
+
+        // Check that THIS criterion matched something (not just that the
+        // accumulated entities vector is non-empty from a previous criterion).
+        if (entities.size() == entities_before) {
           throw std::runtime_error(fmt::format(
-              "No entities found in selection '{}'", sel.raw_input()));
-        };
+              "No entities found for selection '{}'", sel.raw_input()));
+        }
         trajan::log::debug("Identified {} entities in selection '{}'",
-                           num_entities, sel.raw_input());
+                           entities.size() - entities_before, sel.raw_input());
       },
       selection);
 };
@@ -308,7 +304,11 @@ selection_validator(const std::string &input,
   trajan::log::debug("Raw selection string: '{}'", input);
   auto result = SelectionParser::parse(input);
   if (!result) {
-    throw std::invalid_argument("Invalid selection format");
+    throw std::invalid_argument(fmt::format(
+        "Invalid selection: '{}'. "
+        "Expected format: i<int>[,<int>|-<int>]... | a<type>[,<type>]... | "
+        "j<int>[,<int>|-<int>]... | m<type>[,<type>]...",
+        input));
   }
   if (restrictions.has_value()) {
     for (const auto &sel : result.value()) {

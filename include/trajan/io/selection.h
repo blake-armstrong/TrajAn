@@ -72,7 +72,7 @@ template <> struct SelectionTraits<AtomIndexSelection> {
   static std::optional<value_type> validate(const std::string &token) {
     try {
       int value = std::stoi(token);
-      return value;
+      return value >= 0 ? std::optional<value_type>(value) : std::nullopt;
     } catch (...) {
       return std::nullopt;
     }
@@ -101,7 +101,7 @@ template <> struct SelectionTraits<AtomTypeSelection> {
 
   static std::optional<value_type> validate(const std::string &token) {
     if (std::all_of(token.begin(), token.end(), [](char c) {
-          return std::isalnum(c) || c == '_' || c == '*';
+          return std::isalnum(c) || c == '_';
         })) {
       return token;
     }
@@ -116,7 +116,7 @@ template <> struct SelectionTraits<MoleculeTypeSelection> {
 
   static std::optional<value_type> validate(const std::string &token) {
     if (std::all_of(token.begin(), token.end(), [](char c) {
-          return std::isalnum(c) || c == '_' || c == '*';
+          return std::isalnum(c) || c == '_';
         })) {
       return token;
     }
