@@ -15,3 +15,11 @@ catch_discover_tests(test_core)
 add_executable(test_main "${CMAKE_CURRENT_SOURCE_DIR}/test_main.cpp")
 target_link_libraries(test_main PRIVATE trajan_main trajan_core trajan_io Catch2::Catch2WithMain)
 catch_discover_tests(test_main)
+
+add_executable(test_cli "${CMAKE_CURRENT_SOURCE_DIR}/test_cli.cpp")
+target_link_libraries(test_cli PRIVATE Catch2::Catch2)
+target_compile_definitions(test_cli PRIVATE
+    TRAJAN_BINARY="$<TARGET_FILE:trajan>"
+)
+add_dependencies(test_cli trajan)
+catch_discover_tests(test_cli)
