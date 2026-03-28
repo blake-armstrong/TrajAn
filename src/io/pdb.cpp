@@ -11,6 +11,7 @@
 // #include <trajan/core/unit_cell.h>
 #include <trajan/core/units.h>
 #include <trajan/io/pdb.h>
+#include <unordered_map>
 
 namespace trajan::io {
 
@@ -53,6 +54,13 @@ bool PDBHandler::parse_pdb(Frame &frame) {
   atoms.clear();
   bool atoms_set{false};
   core::AtomGraph atom_graph;
+  // Map from PDB serial number to 0-based frame index.
+  // Needed because serials are arbitrary identifiers, not necessarily 1-based.
+  std::unordered_map<int, size_t> serial_to_index;
+  // These are populated once when the first CONECT record is encountered.
+  core::Mat3N conect_cart_pos;
+  std::optional<UnitCell> conect_uc;
+  std::optional<core::Mat3N> conect_frac_pos;
   std::string line;
   while (std::getline(m_infile, line)) {
     if (line.substr(0, 6) == "CRYST1") {
@@ -114,6 +122,7 @@ bool PDBHandler::parse_pdb(Frame &frame) {
       occ::util::trim(atom.molecule_type);
       atom.umolecule_index = res_seq;
       atom.molecule_index = 0;
+      serial_to_index[serial] = atoms.size();
       atoms.push_back(atom);
       atoms_set = false;
       trajan::log::trace("{}: Creating atom: {}", record_name, atom.repr());
@@ -124,36 +133,67 @@ bool PDBHandler::parse_pdb(Frame &frame) {
       if (!atoms_set) {
         frame.set_atoms(atoms);
         atoms_set = true;
+        // Compute cart/frac positions once for the whole CONECT section.
+        conect_cart_pos = frame.cart_pos();
+        conect_uc = frame.unit_cell();
+        if (conect_uc) {
+          conect_frac_pos = conect_uc->to_fractional(conect_cart_pos);
+        }
       }
-      char record_name[7];
-      int ais[5];
-      int result =
-          std::sscanf(line.c_str(), PDB_CONECT_FMT_READ.data(), record_name,
-                      &ais[0], &ais[1], &ais[2], &ais[3], &ais[4]);
-      core::Mat3N cart_pos = frame.cart_pos();
-      const auto &uc = frame.unit_cell();
-      auto frac_pos =
-          uc ? std::make_optional(uc->to_fractional(cart_pos)) : std::nullopt;
-      size_t a_main = ais[0] - 1;
-      for (int ai = 1; ai < result - 1; ai++) {
+
+      // sscanf with %Nd skips leading whitespace before counting characters,
+      // which corrupts fixed-column PDB fields when serials are right-justified
+      // in 5-char columns (e.g. " 9999" + "10000" becomes 99991 instead of
+      // 9999). Use explicit fixed-column extraction instead.
+      auto read_col5 = [&](int col_start) -> int {
+        if (col_start >= static_cast<int>(line.size()))
+          return 0;
+        int len = std::min(5, static_cast<int>(line.size()) - col_start);
+        try {
+          return std::stoi(line.substr(col_start, len));
+        } catch (...) {
+          return 0;
+        }
+      };
+
+      int main_serial = read_col5(6);
+      if (main_serial <= 0)
+        continue;
+      auto main_it = serial_to_index.find(main_serial);
+      if (main_it == serial_to_index.end()) {
+        trajan::log::warn("CONECT: main serial {} not found, skipping",
+                          main_serial);
+        continue;
+      }
+      size_t a_main = main_it->second;
+
+      // Up to 4 bonded atoms occupy columns 11, 16, 21, 26 (0-indexed).
+      for (int col : {11, 16, 21, 26}) {
+        int bonded_serial = read_col5(col);
+        if (bonded_serial <= 0)
+          continue;
+        auto bonded_it = serial_to_index.find(bonded_serial);
+        if (bonded_it == serial_to_index.end()) {
+          trajan::log::warn("CONECT: bonded serial {} not found, skipping",
+                            bonded_serial);
+          continue;
+        }
+        size_t aj = bonded_it->second;
+
         core::Bond bond;
-        size_t aj = ais[ai] - 1;
         bond.indices = {a_main, aj};
-        if (uc) {
-          if (!frac_pos) {
-            throw std::runtime_error("No fractional coordinates");
-          }
-          if (a_main >= frac_pos->cols() || aj >= frac_pos->cols()) {
-            throw std::runtime_error("Index out of bounds");
-          }
-          core::Vec3 frac_dist = frac_pos->col(a_main) - frac_pos->col(aj);
+        if (conect_uc) {
+          core::Vec3 frac_dist =
+              conect_frac_pos->col(a_main) - conect_frac_pos->col(aj);
           frac_dist = frac_dist.array() - frac_dist.array().round();
-          core::Vec3 cart_dist = uc->to_cartesian(frac_dist);
+          core::Vec3 cart_dist = conect_uc->to_cartesian(frac_dist);
           bond.bond_length = std::sqrt(cart_dist.squaredNorm());
         } else {
-          core::Vec3 cart_dist = cart_pos.col(a_main) - cart_pos.col(aj);
+          core::Vec3 cart_dist =
+              conect_cart_pos.col(a_main) - conect_cart_pos.col(aj);
           bond.bond_length = std::sqrt(cart_dist.squaredNorm());
         }
+
         atom_graph.add_edge(a_main, aj, bond, true);
         trajan::log::trace(
             "CONECT: Creating bond between atom indices {:>5} {:>5}: "
@@ -162,17 +202,14 @@ bool PDBHandler::parse_pdb(Frame &frame) {
         if (atoms[a_main].molecule_type != atoms[aj].molecule_type) {
           trajan::log::warn(
               "  atoms {:>5} {:>5} are bonded according to CONECT but not of "
-              "the same residue type({} and {}) !",
+              "the same residue type ({} and {})",
               a_main, aj, atoms[a_main].molecule_type, atoms[aj].molecule_type);
-        }
-        if (atoms[a_main].molecule_type == atoms[aj].molecule_type) {
-          if (atoms[a_main].molecule_index != atoms[aj].molecule_index) {
-            trajan::log::warn(
-                "  atoms {:>5} {:>5} are bonded according to CONECT but do not "
-                "have the same residue index({} and {} of residue type{})!",
-                a_main, aj, atoms[a_main].molecule_index,
-                atoms[aj].molecule_index, atoms[a_main].molecule_type);
-          }
+        } else if (atoms[a_main].molecule_index != atoms[aj].molecule_index) {
+          trajan::log::warn(
+              "  atoms {:>5} {:>5} are bonded according to CONECT but do not "
+              "have the same residue index ({} and {} of residue type {})",
+              a_main, aj, atoms[a_main].molecule_index,
+              atoms[aj].molecule_index, atoms[a_main].molecule_type);
         }
       }
       continue;
