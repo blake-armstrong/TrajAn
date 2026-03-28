@@ -11,7 +11,7 @@
 // #include <trajan/core/unit_cell.h>
 #include <trajan/core/units.h>
 #include <trajan/io/pdb.h>
-#include <unordered_map>
+#include <ankerl/unordered_dense.h>
 
 namespace trajan::io {
 
@@ -56,7 +56,7 @@ bool PDBHandler::parse_pdb(Frame &frame) {
   core::AtomGraph atom_graph;
   // Map from PDB serial number to 0-based frame index.
   // Needed because serials are arbitrary identifiers, not necessarily 1-based.
-  std::unordered_map<int, size_t> serial_to_index;
+  ankerl::unordered_dense::map<int, size_t> serial_to_index;
   // These are populated once when the first CONECT record is encountered.
   core::Mat3N conect_cart_pos;
   std::optional<UnitCell> conect_uc;
