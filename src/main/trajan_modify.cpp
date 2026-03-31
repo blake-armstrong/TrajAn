@@ -1,6 +1,9 @@
 #include <ankerl/unordered_dense.h>
+#include <cmath>
+#include <stdexcept>
 #include <trajan/core/log.h>
 #include <trajan/core/neigh.h>
+#include <trajan/core/units.h>
 #include <trajan/io/selection.h>
 #include <trajan/main/trajan_modify.h>
 
@@ -73,6 +76,87 @@ void register_modify_transforms(const ModifyOpts &opts, Trajectory &traj,
     }
   }
 
+  if (!opts.raw_rotate.empty()) {
+    double angle_deg = std::stod(opts.raw_rotate[0]);
+    char axis_char =
+        static_cast<char>(std::tolower(static_cast<unsigned char>(
+            opts.raw_rotate[1][0])));
+    if (axis_char != 'x' && axis_char != 'y' && axis_char != 'z') {
+      throw std::invalid_argument(
+          fmt::format("--rotate axis must be x, y, or z, got '{}'",
+                      opts.raw_rotate[1]));
+    }
+    double angle_rad = trajan::units::radians(angle_deg);
+    double c = std::cos(angle_rad), s = std::sin(angle_rad);
+
+    // Build a rotate-in-place function for a single atom position.
+    // Rotation is about the global origin.
+    auto rotate_pos = [axis_char, c, s](double &x, double &y, double &z) {
+      double nx, ny, nz;
+      switch (axis_char) {
+      case 'x':
+        nx = x; ny = c * y - s * z; nz = s * y + c * z;
+        break;
+      case 'y':
+        nx = c * x + s * z; ny = y; nz = -s * x + c * z;
+        break;
+      default: // z
+        nx = c * x - s * y; ny = s * x + c * y; nz = z;
+        break;
+      }
+      x = nx; y = ny; z = nz;
+    };
+
+    if (opts.raw_sel.empty()) {
+      trajan::log::debug(
+          "modify: registering rotate {:.4f} deg about {} for all atoms",
+          angle_deg, axis_char);
+      pipeline.add_transform(
+          [rotate_pos](trajan::core::Frame &frame) mutable {
+            for (auto &atom : frame.atoms())
+              rotate_pos(atom.x, atom.y, atom.z);
+          });
+    } else {
+      auto parsed_sel = io::selection_expr_validator(opts.raw_sel);
+      io::MolOrigin mol_origin = opts.mol_origin;
+      trajan::log::debug(
+          "modify: registering rotate {:.4f} deg about {} for selection '{}'",
+          angle_deg, axis_char, opts.raw_sel);
+
+      bool first_call = true;
+      std::vector<core::EntityVariant> entities;
+      pipeline.add_transform([rotate_pos, parsed_sel, mol_origin, &traj,
+                               first_call,
+                               entities](trajan::core::Frame &frame) mutable {
+        if (first_call || traj.topology_has_changed()) {
+          entities = traj.get_entities(parsed_sel, mol_origin);
+          first_call = false;
+        } else {
+          traj.update_entities(entities);
+        }
+        ankerl::unordered_dense::set<size_t> indices;
+        indices.reserve(entities.size());
+        for (const auto &ev : entities) {
+          std::visit(
+              [&](const auto &e) {
+                using T = std::decay_t<decltype(e)>;
+                if constexpr (std::is_same_v<T, core::Atom>) {
+                  indices.insert(static_cast<size_t>(e.index));
+                } else if constexpr (std::is_same_v<T, core::Molecule>) {
+                  for (const auto &a : e.atoms())
+                    indices.insert(static_cast<size_t>(a.index));
+                }
+              },
+              ev);
+        }
+        for (auto &atom : frame.atoms()) {
+          if (indices.count(static_cast<size_t>(atom.index)))
+            rotate_pos(atom.x, atom.y, atom.z);
+        }
+      });
+    }
+  }
+
   if (opts.wrap) {
     trajan::log::debug("modify: registering PBC wrap");
     pipeline.add_transform([](trajan::core::Frame &frame) {
@@ -110,13 +194,21 @@ CLI::App *add_modify_subcommand(CLI::App &app, Trajectory &traj,
                          "Affects all atoms unless --sel is given.")
           ->expected(3);
 
+  auto *rotate_opt =
+      modify->add_option("--rotate", opts->raw_rotate,
+                         "Rotate atom positions by <degrees> about <axis> "
+                         "(axis: x, y, or z). Rotates about the global origin. "
+                         "Affects all atoms unless --sel is given.\n"
+                         "Example: --rotate 45.0 z")
+          ->expected(2);
+
   modify->add_flag("--wrap", opts->wrap,
                    "Wrap atom positions into the primary unit cell (requires "
                    "unit cell in trajectory)");
 
   modify->add_option(
       "--sel,-s", opts->raw_sel,
-      "Selection to restrict --translate (prefix: i=atom indices, "
+      "Selection to restrict --translate and --rotate (prefix: i=atom indices,\n"
       "a=atom types, j=molecule indices, m=molecule types).\n"
       "Supports boolean expressions and position predicates, e.g.:\n"
       "  (aO) and (z > 40 and z < 80)\n"
@@ -134,12 +226,15 @@ CLI::App *add_modify_subcommand(CLI::App &app, Trajectory &traj,
               {"centroid", io::MolOrigin::Centroid}}))
       ->capture_default_str();
 
-  modify->callback([opts, trans_opt, &traj, &pipeline]() {
+  modify->callback([opts, trans_opt, rotate_opt, &traj, &pipeline]() {
     trajan::log::set_subcommand_log_pattern("modify");
     trajan::log::debug("Beginning modify subcommand");
 
     if (trans_opt->count() == 0) {
       opts->translate = {0.0, 0.0, 0.0};
+    }
+    if (rotate_opt->count() == 0) {
+      opts->raw_rotate.clear();
     }
 
     register_modify_transforms(*opts, traj, pipeline);
