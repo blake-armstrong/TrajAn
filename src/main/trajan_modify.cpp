@@ -88,10 +88,14 @@ void register_modify_transforms(const ModifyOpts &opts, Trajectory &traj,
     }
     double angle_rad = trajan::units::radians(angle_deg);
     double c = std::cos(angle_rad), s = std::sin(angle_rad);
+    double ox = opts.rotate_origin[0];
+    double oy = opts.rotate_origin[1];
+    double oz = opts.rotate_origin[2];
 
-    // Build a rotate-in-place function for a single atom position.
-    // Rotation is about the global origin.
-    auto rotate_pos = [axis_char, c, s](double &x, double &y, double &z) {
+    // Rotate about an arbitrary point: translate to origin, rotate, translate back.
+    auto rotate_pos = [axis_char, c, s, ox, oy, oz](double &x, double &y,
+                                                      double &z) {
+      x -= ox; y -= oy; z -= oz;
       double nx, ny, nz;
       switch (axis_char) {
       case 'x':
@@ -104,7 +108,7 @@ void register_modify_transforms(const ModifyOpts &opts, Trajectory &traj,
         nx = c * x - s * y; ny = s * x + c * y; nz = z;
         break;
       }
-      x = nx; y = ny; z = nz;
+      x = nx + ox; y = ny + oy; z = nz + oz;
     };
 
     if (opts.raw_sel.empty()) {
@@ -197,10 +201,15 @@ CLI::App *add_modify_subcommand(CLI::App &app, Trajectory &traj,
   auto *rotate_opt =
       modify->add_option("--rotate", opts->raw_rotate,
                          "Rotate atom positions by <degrees> about <axis> "
-                         "(axis: x, y, or z). Rotates about the global origin. "
-                         "Affects all atoms unless --sel is given.\n"
-                         "Example: --rotate 45.0 z")
+                         "(axis: x, y, or z). Affects all atoms unless --sel "
+                         "is given.\nExample: --rotate 45.0 z")
           ->expected(2);
+
+  modify->add_option("--rotate-origin", opts->rotate_origin,
+                     "Point to rotate about (default: 0 0 0).\n"
+                     "Example: --rotate-origin 5.0 5.0 0.0")
+      ->expected(3)
+      ->capture_default_str();
 
   modify->add_flag("--wrap", opts->wrap,
                    "Wrap atom positions into the primary unit cell (requires "

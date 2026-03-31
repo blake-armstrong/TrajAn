@@ -13,7 +13,8 @@ using trajan::core::Trajectory;
 
 struct ModifyOpts {
   std::vector<double> translate{0.0, 0.0, 0.0};
-  std::vector<std::string> raw_rotate{}; // [angle_deg, axis], empty if not set
+  std::vector<std::string> raw_rotate{};          // [angle_deg, axis], empty if not set
+  std::vector<double> rotate_origin{0.0, 0.0, 0.0}; // point to rotate about
   bool wrap{false};
   std::string raw_sel{};
   trajan::io::MolOrigin mol_origin{trajan::io::MolOrigin::CenterOfMass};
