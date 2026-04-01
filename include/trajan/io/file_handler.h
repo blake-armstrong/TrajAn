@@ -30,6 +30,8 @@ public:
   bool write_frame(const core::Frame &frame);
   void finalise();
 
+  virtual void set_original_ids(bool) {}
+
   void set_file_path(fs::path file_path) {
     m_file_path = file_path;
     m_file_name = file_path.generic_string();

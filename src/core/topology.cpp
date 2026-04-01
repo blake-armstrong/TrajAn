@@ -380,6 +380,7 @@ void Topology::update_atom_positions(const std::vector<Atom> &atoms) {
         mol_atom.z = atoms[mol_atom.index].z;
       }
     }
+    molecule.sync_occ_positions();
   }
 }
 
@@ -395,6 +396,9 @@ void Topology::generate_molecules() {
   m_atom_to_molecule.clear();
   using ankerl::unordered_dense::map;
   map<std::string, size_t> molecule_counts;
+  // Map from joined sorted atom-type fingerprint → assigned molecule type name.
+  // Avoids O(n²) re-sorting of all previously seen molecules on each insert.
+  ankerl::unordered_dense::map<std::string, std::string> fingerprint_to_type;
   size_t unique_molecule_counter{0};
   for (const auto &[component_id, vertices] : grouped) {
     std::vector<Atom> atoms;
@@ -422,17 +426,16 @@ void Topology::generate_molecules() {
     molecule.index = m_molecules.size();
     molecule.uindex = residue_index[0];
     molecule.utype = residue_name[0];
-    bool unique{true};
-    for (const auto &m : m_molecules) {
-      if (molecule.is_comparable_to(m)) {
-        molecule.type = m.type;
-        unique = false;
-        break;
-      }
-    }
-    if (unique) {
+    auto sorted_types = molecule.atom_types();
+    std::sort(sorted_types.begin(), sorted_types.end());
+    std::string fingerprint = trajan::util::format_vector(sorted_types);
+    auto it = fingerprint_to_type.find(fingerprint);
+    if (it != fingerprint_to_type.end()) {
+      molecule.type = it->second;
+    } else {
       molecule.type = fmt::format("M{}", unique_molecule_counter + 1);
       unique_molecule_counter++;
+      fingerprint_to_type[fingerprint] = molecule.type;
     }
     molecule_counts[molecule.type]++;
     molecule.subindex = molecule_counts[molecule.type];

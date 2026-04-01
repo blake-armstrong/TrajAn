@@ -6,6 +6,7 @@ namespace trajan::main {
 void run_write_subcommand(const WriteOpts &opts, Trajectory &traj,
                           const Pipeline &pipeline) {
   traj.set_output_file(opts.outfile);
+  traj.set_output_original_ids(opts.original_ids);
 
   size_t frame_count = 0;
   while (traj.next_frame()) {
@@ -27,6 +28,9 @@ CLI::App *add_write_subcommand(CLI::App &app, Trajectory &traj,
   auto opts = std::make_shared<WriteOpts>();
   write->add_option("outfile", opts->outfile, "Output trajectory file path")
       ->required();
+  write->add_flag("--original-ids", opts->original_ids,
+                  "Use the original atom serial numbers from the input file "
+                  "instead of renumbering 1..N.");
 
   write->callback([opts, &traj, &pipeline]() {
     trajan::log::set_subcommand_log_pattern("write");

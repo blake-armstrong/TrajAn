@@ -48,6 +48,7 @@ public:
   void load_files(const std::vector<fs::path> &files);
   void load_files_into_memory(const std::vector<fs::path> &files);
   void set_output_file(const fs::path &file);
+  void set_output_original_ids(bool v);
 
   bool next_frame();
   void write_frame();

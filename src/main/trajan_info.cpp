@@ -1,3 +1,4 @@
+#include <map>
 #include <trajan/main/trajan_info.h>
 
 namespace trajan::main {
@@ -36,6 +37,39 @@ void print_section_header(const std::string &title) {
   const size_t remaining = SEP_WIDTH - prefix.size() - title.size() - 1;
   trajan::log::info("{}{} {}", prefix, title,
                     make_separator(SEP_LIGHT, remaining));
+}
+
+// Prints a field whose value is a list of strings, wrapping at SEP_WIDTH.
+// Continuation lines use an empty label (same fill width) so the value column
+// stays aligned.
+void print_wrapped_field(size_t fill_width, const std::string &label,
+                         std::vector<std::string> items,
+                         const std::string &indent = "  |  ") {
+  // prefix width: indent + fill_width chars + " : " (3)
+  const size_t prefix_width = indent.size() + fill_width + 1 + 3;
+  const size_t value_width =
+      SEP_WIDTH > prefix_width ? SEP_WIDTH - prefix_width : 10;
+
+  std::vector<std::string> lines;
+  std::string current;
+  for (size_t i = 0; i < items.size(); ++i) {
+    const std::string sep = current.empty() ? "" : ", ";
+    if (!current.empty() &&
+        current.size() + sep.size() + items[i].size() > value_width) {
+      lines.push_back(current);
+      current = items[i];
+    } else {
+      current += sep + items[i];
+    }
+  }
+  if (!current.empty())
+    lines.push_back(current);
+  if (lines.empty())
+    lines.push_back("None");
+
+  print_field(fill_width, label, lines[0], indent);
+  for (size_t i = 1; i < lines.size(); ++i)
+    print_field(fill_width, "", lines[i], indent);
 }
 
 void print_section_footer() {
@@ -108,9 +142,8 @@ void run_info_subcommand(const InfoOpts &opts, Trajectory &traj) {
     // -- Composition --------------------------------------------------------
     print_section_header("Composition");
 
-    using ankerl::unordered_dense::map;
-    map<std::string, size_t> atom_type_count;
-    map<std::string, std::string> atom_type_elements;
+    std::map<std::string, size_t> atom_type_count;
+    std::map<std::string, std::string> atom_type_elements;
     double mass = 0.0;
     size_t total_atoms = traj.atoms().size();
 
@@ -187,12 +220,14 @@ void run_info_subcommand(const InfoOpts &opts, Trajectory &traj) {
         mfield("count", fmt::format("{}", count));
         mfield("atoms per molecule", fmt::format("{}", m.atoms().size()));
 
-        const auto atom_types_str = trajan::util::format_vector(m.atom_types());
-        const auto elements_str =
-            trajan::util::format_vector(m.element_symbols());
-        mfield("atom types", atom_types_str);
-        if (atom_types_str != elements_str) {
-          mfield("elements", elements_str);
+        auto atom_types_vec = m.atom_types();
+        std::sort(atom_types_vec.begin(), atom_types_vec.end());
+        print_wrapped_field(mfw, "atom types", atom_types_vec, "  |  |  ");
+
+        auto elements_vec = m.element_symbols();
+        std::sort(elements_vec.begin(), elements_vec.end());
+        if (atom_types_vec != elements_vec) {
+          print_wrapped_field(mfw, "elements", elements_vec, "  |  |  ");
         }
 
         mfield("molar mass", fmt::format("{:.4f} g/mol", m.molar_mass() * 1e3));

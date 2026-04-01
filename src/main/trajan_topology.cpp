@@ -147,9 +147,9 @@ CLI::App *add_topology_subcommand(CLI::App &app, Trajectory &traj) {
       "\n"
       "can be useful when analysing non-classical or reactive-classical \n"
       "simulations.\n");
-  top->add_option("--from-file", opts->use_input_topology,
-                  "Create the system topology from an input file (e.g., from "
-                  "the CONECT line in a PDB file.)");
+  top->add_flag("--from-file", opts->use_input_topology,
+               "Create the system topology from an input file (e.g., from "
+               "the CONECT line in a PDB file.)");
   top->callback([opts, &traj]() {
     trajan::log::set_subcommand_log_pattern("top");
     run_topology_subcommand(*opts, traj);

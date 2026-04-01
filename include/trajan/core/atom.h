@@ -23,6 +23,7 @@ struct EnhancedAtom : public occ::core::Atom {
   std::string type, molecule_type = "UNK";
   int index, molecule_index;
   int uindex = 0, umolecule_index = 0;
+  double charge{0.0};
   // size_t serial;
 
   EnhancedAtom() : Atom(0, 0.0, 0.0, 0.0), element(0) {};

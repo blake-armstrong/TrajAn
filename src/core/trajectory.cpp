@@ -70,6 +70,11 @@ void Trajectory::set_output_file(const fs::path &file) {
   m_output_handler->initialise(io::FileHandler::Mode::Write);
 }
 
+void Trajectory::set_output_original_ids(bool v) {
+  if (m_output_handler)
+    m_output_handler->set_original_ids(v);
+}
+
 bool Trajectory::_next_frame() {
   if (m_frames_in_memory) {
     if (m_current_frame_index >= m_frames.size()) {
@@ -333,12 +338,15 @@ void Trajectory::update_topology(
   }
   trajan::log::trace("Atom graph created with {} vertices",
                      atom_graph.num_vertices());
-  double max_cov_radii = occ::core::max_covalent_radius();
+  double max_cov_radii = 0.0;
+  for (const auto &a : atoms) {
+    max_cov_radii = std::max(max_cov_radii, static_cast<double>(a.element.covalent_radius()));
+  }
   trajan::log::debug("Maximum covalent radius: {:.4f} Angstroms",
                      max_cov_radii);
   trajan::log::debug("Bond tolerance: {:.4f} Angstroms",
                      final_settings.bond_tolerance);
-  double max_cov_cutoff = max_cov_radii + final_settings.bond_tolerance;
+  double max_cov_cutoff = 2.0 * max_cov_radii + final_settings.bond_tolerance;
   trajan::log::debug("Creating topology neighbour list with cutoff: ");
   trajan::log::debug("  {:.3f} ({:.3f} + {:.3f}) Angstroms", max_cov_cutoff,
                      max_cov_radii, final_settings.bond_tolerance);

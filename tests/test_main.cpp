@@ -119,7 +119,8 @@ TEST_CASE("register_modify_transforms - translate shifts all atoms",
   ModifyOpts opts;
   opts.translate = {1.0, 2.0, 3.0};
   opts.wrap = false;
-  trajan::main::register_modify_transforms(opts, pipeline);
+  Trajectory traj;
+  trajan::main::register_modify_transforms(opts, traj, pipeline);
 
   REQUIRE(pipeline.size() == 1);
 
@@ -145,7 +146,8 @@ TEST_CASE("register_modify_transforms - zero translate registers no transform",
   ModifyOpts opts;
   opts.translate = {0.0, 0.0, 0.0};
   opts.wrap = false;
-  trajan::main::register_modify_transforms(opts, pipeline);
+  Trajectory traj;
+  trajan::main::register_modify_transforms(opts, traj, pipeline);
 
   REQUIRE(pipeline.empty());
 }
@@ -156,7 +158,8 @@ TEST_CASE("register_modify_transforms - wrap into unit cell",
   ModifyOpts opts;
   opts.translate = {0.0, 0.0, 0.0};
   opts.wrap = true;
-  trajan::main::register_modify_transforms(opts, pipeline);
+  Trajectory traj;
+  trajan::main::register_modify_transforms(opts, traj, pipeline);
 
   REQUIRE(pipeline.size() == 1);
 
@@ -185,7 +188,8 @@ TEST_CASE("register_modify_transforms - wrap without unit cell is a no-op",
   ModifyOpts opts;
   opts.translate = {0.0, 0.0, 0.0};
   opts.wrap = true;
-  trajan::main::register_modify_transforms(opts, pipeline);
+  Trajectory traj;
+  trajan::main::register_modify_transforms(opts, traj, pipeline);
 
   Frame frame;
   auto atoms = make_water_atoms();
@@ -204,7 +208,8 @@ TEST_CASE("register_modify_transforms - translate and wrap both registered",
   ModifyOpts opts;
   opts.translate = {5.0, 0.0, 0.0}; // shift into box then wrap
   opts.wrap = true;
-  trajan::main::register_modify_transforms(opts, pipeline);
+  Trajectory traj;
+  trajan::main::register_modify_transforms(opts, traj, pipeline);
 
   REQUIRE(pipeline.size() == 2);
 }
@@ -309,7 +314,7 @@ TEST_CASE(
     Pipeline pipeline;
     ModifyOpts modify_opts;
     modify_opts.translate = {shift, 0.0, 0.0};
-    trajan::main::register_modify_transforms(modify_opts, pipeline);
+    trajan::main::register_modify_transforms(modify_opts, traj, pipeline);
 
     WriteOpts write_opts;
     write_opts.outfile = dst;
@@ -355,7 +360,7 @@ TEST_CASE(
     Pipeline pipeline;
     ModifyOpts modify_opts;
     modify_opts.translate = {shift, 0.0, 0.0};
-    trajan::main::register_modify_transforms(modify_opts, pipeline);
+    trajan::main::register_modify_transforms(modify_opts, traj, pipeline);
 
     WriteOpts write_opts;
     write_opts.outfile = dst;
@@ -403,7 +408,7 @@ TEST_CASE("modify + write pipeline - streaming and in-memory produce identical "
     Pipeline pipeline;
     ModifyOpts modify_opts;
     modify_opts.translate = {1.5, -0.5, 2.0};
-    trajan::main::register_modify_transforms(modify_opts, pipeline);
+    trajan::main::register_modify_transforms(modify_opts, traj, pipeline);
 
     WriteOpts write_opts;
     write_opts.outfile = dst;

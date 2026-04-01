@@ -11,6 +11,7 @@ using trajan::core::Trajectory;
 
 struct WriteOpts {
   std::filesystem::path outfile;
+  bool original_ids{false};
 };
 
 void run_write_subcommand(const WriteOpts &opts, Trajectory &traj,

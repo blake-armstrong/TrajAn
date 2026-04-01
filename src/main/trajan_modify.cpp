@@ -181,6 +181,123 @@ void register_modify_transforms(const ModifyOpts &opts, Trajectory &traj,
       }
     });
   }
+
+  // Helper: build an index set from entities (reused by all three setters).
+  auto make_index_set =
+      [](const std::vector<core::EntityVariant> &entities) {
+        ankerl::unordered_dense::set<size_t> indices;
+        indices.reserve(entities.size());
+        for (const auto &ev : entities) {
+          std::visit(
+              [&](const auto &e) {
+                using T = std::decay_t<decltype(e)>;
+                if constexpr (std::is_same_v<T, core::Atom>) {
+                  indices.insert(static_cast<size_t>(e.index));
+                } else if constexpr (std::is_same_v<T, core::Molecule>) {
+                  for (const auto &a : e.atoms())
+                    indices.insert(static_cast<size_t>(a.index));
+                }
+              },
+              ev);
+        }
+        return indices;
+      };
+
+  if (opts.set_charge.has_value()) {
+    const double val = opts.set_charge.value();
+    if (opts.raw_sel.empty()) {
+      trajan::log::debug("modify: set charge = {} for all atoms", val);
+      pipeline.add_transform([val](trajan::core::Frame &frame) {
+        for (auto &atom : frame.atoms())
+          atom.charge = val;
+      });
+    } else {
+      auto parsed_sel = io::selection_expr_validator(opts.raw_sel);
+      io::MolOrigin mol_origin = opts.mol_origin;
+      trajan::log::debug("modify: set charge = {} for selection '{}'", val,
+                         opts.raw_sel);
+      bool first_call = true;
+      std::vector<core::EntityVariant> entities;
+      pipeline.add_transform(
+          [val, parsed_sel, mol_origin, make_index_set, &traj, first_call,
+           entities](trajan::core::Frame &frame) mutable {
+            if (first_call || traj.topology_has_changed()) {
+              entities = traj.get_entities(parsed_sel, mol_origin);
+              first_call = false;
+            } else {
+              traj.update_entities(entities);
+            }
+            auto indices = make_index_set(entities);
+            for (auto &atom : frame.atoms())
+              if (indices.count(static_cast<size_t>(atom.index)))
+                atom.charge = val;
+          });
+    }
+  }
+
+  if (opts.set_type.has_value()) {
+    const std::string val = opts.set_type.value();
+    if (opts.raw_sel.empty()) {
+      trajan::log::debug("modify: set type = '{}' for all atoms", val);
+      pipeline.add_transform([val](trajan::core::Frame &frame) {
+        for (auto &atom : frame.atoms())
+          atom.type = val;
+      });
+    } else {
+      auto parsed_sel = io::selection_expr_validator(opts.raw_sel);
+      io::MolOrigin mol_origin = opts.mol_origin;
+      trajan::log::debug("modify: set type = '{}' for selection '{}'", val,
+                         opts.raw_sel);
+      bool first_call = true;
+      std::vector<core::EntityVariant> entities;
+      pipeline.add_transform(
+          [val, parsed_sel, mol_origin, make_index_set, &traj, first_call,
+           entities](trajan::core::Frame &frame) mutable {
+            if (first_call || traj.topology_has_changed()) {
+              entities = traj.get_entities(parsed_sel, mol_origin);
+              first_call = false;
+            } else {
+              traj.update_entities(entities);
+            }
+            auto indices = make_index_set(entities);
+            for (auto &atom : frame.atoms())
+              if (indices.count(static_cast<size_t>(atom.index)))
+                atom.type = val;
+          });
+    }
+  }
+
+  if (opts.set_mol_type.has_value()) {
+    const std::string val = opts.set_mol_type.value();
+    if (opts.raw_sel.empty()) {
+      trajan::log::debug("modify: set mol-type = '{}' for all atoms", val);
+      pipeline.add_transform([val](trajan::core::Frame &frame) {
+        for (auto &atom : frame.atoms())
+          atom.molecule_type = val;
+      });
+    } else {
+      auto parsed_sel = io::selection_expr_validator(opts.raw_sel);
+      io::MolOrigin mol_origin = opts.mol_origin;
+      trajan::log::debug("modify: set mol-type = '{}' for selection '{}'", val,
+                         opts.raw_sel);
+      bool first_call = true;
+      std::vector<core::EntityVariant> entities;
+      pipeline.add_transform(
+          [val, parsed_sel, mol_origin, make_index_set, &traj, first_call,
+           entities](trajan::core::Frame &frame) mutable {
+            if (first_call || traj.topology_has_changed()) {
+              entities = traj.get_entities(parsed_sel, mol_origin);
+              first_call = false;
+            } else {
+              traj.update_entities(entities);
+            }
+            auto indices = make_index_set(entities);
+            for (auto &atom : frame.atoms())
+              if (indices.count(static_cast<size_t>(atom.index)))
+                atom.molecule_type = val;
+          });
+    }
+  }
 }
 
 CLI::App *add_modify_subcommand(CLI::App &app, Trajectory &traj,
@@ -214,6 +331,18 @@ CLI::App *add_modify_subcommand(CLI::App &app, Trajectory &traj,
   modify->add_flag("--wrap", opts->wrap,
                    "Wrap atom positions into the primary unit cell (requires "
                    "unit cell in trajectory)");
+
+  modify->add_option("--set-charge", opts->set_charge,
+                     "Set the partial charge of selected atoms to this value. "
+                     "Affects all atoms unless --sel is given.");
+
+  modify->add_option("--set-type", opts->set_type,
+                     "Set the atom type label of selected atoms (e.g. CA, OW). "
+                     "Affects all atoms unless --sel is given.");
+
+  modify->add_option("--set-mol-type", opts->set_mol_type,
+                     "Set the molecule/residue type of selected atoms (e.g. WAT, ASP). "
+                     "Affects all atoms unless --sel is given.");
 
   modify->add_option(
       "--sel,-s", opts->raw_sel,

@@ -29,6 +29,19 @@ public:
     return elements_str;
   }
 
+  // Sync the occ::Molecule internal position matrix from the current
+  // enhanced_atom x/y/z coordinates (which are kept up to date per-frame).
+  // occ::Molecule::positions() is read-only, so we use const_cast.
+  // m_positions is stored in Angstroms (same units as enhanced_atoms).
+  inline void sync_occ_positions() {
+    auto &pos = const_cast<occ::Mat3N &>(this->positions());
+    for (size_t i = 0; i < enhanced_atoms.size(); ++i) {
+      pos(0, i) = enhanced_atoms[i].x;
+      pos(1, i) = enhanced_atoms[i].y;
+      pos(2, i) = enhanced_atoms[i].z;
+    }
+  }
+
   inline std::vector<std::string> atom_types() const {
     std::vector<std::string> atom_types;
     atom_types.reserve(enhanced_atoms.size());
