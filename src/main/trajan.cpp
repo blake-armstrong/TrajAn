@@ -10,6 +10,7 @@
 #include <trajan/main/trajan_qc.h>
 #include <trajan/main/trajan_rdf.h>
 #include <trajan/main/trajan_topology.h>
+#include <trajan/main/trajan_pmepot.h>
 #include <trajan/main/trajan_surface.h>
 #include <trajan/main/trajan_wrap.h>
 #include <trajan/main/trajan_write.h>
@@ -45,11 +46,13 @@ int main(int argc, char *argv[]) {
   auto *rdf = trajan::main::add_rdf_subcommand(app, trajectory, pipeline);
   auto *qc = trajan::main::add_qc_subcommand(app, trajectory, pipeline);
   auto *modify = trajan::main::add_modify_subcommand(app, trajectory, pipeline);
+  auto *pmepot = trajan::main::add_pmepot_subcommand(app, trajectory, pipeline);
   auto *surface = trajan::main::add_surface_subcommand(app, trajectory, pipeline);
   auto *wrap = trajan::main::add_wrap_subcommand(app, trajectory, pipeline);
   auto *write = trajan::main::add_write_subcommand(app, trajectory, pipeline);
 
   modify->needs(load);
+  pmepot->needs(load);
   surface->needs(load);
   wrap->needs(load);
   write->needs(load);

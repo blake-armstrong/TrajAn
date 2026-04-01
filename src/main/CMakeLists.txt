@@ -6,6 +6,7 @@ add_library(trajan_main
   "${CMAKE_CURRENT_SOURCE_DIR}/trajan_qc.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/trajan_write.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/trajan_modify.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/trajan_pmepot.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/trajan_surface.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/trajan_wrap.cpp"
   #  "${CMAKE_CURRENT_SOURCE_DIR}/trajan_opt.cpp"
