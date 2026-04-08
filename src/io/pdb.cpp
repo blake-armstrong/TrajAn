@@ -52,8 +52,7 @@ void PDBHandler::_finalise() {
 
 bool PDBHandler::parse_pdb(Frame &frame) {
   trajan::log::trace("Attempting to parse PDB frame");
-  std::vector<core::Atom> &atoms = frame.atoms();
-  atoms.clear();
+  std::vector<core::Atom> atoms;
 
   // Carry forward unit cell from a previous frame if this frame has no CRYST1.
   if (m_cached_uc.has_value())

@@ -1,4 +1,5 @@
 #include "occ/core/units.h"
+#include <sstream>
 #include "trajan/core/frame.h"
 #include "trajan/core/util.h"
 #include <Eigen/Geometry>
@@ -417,10 +418,13 @@ void Topology::generate_molecules() {
                         trajan::util::format_vector(residue_name));
     }
     if (!trajan::util::all_same(residue_index) && same_res_name) {
-      trajan::log::warn(
-          "not all atoms have the same residue index in same "
-          "residue name ({}) in molecule extracted from topology:\n {}",
-          residue_name[0], trajan::util::format_vector(residue_name));
+      trajan::log::warn("molecule '{}' contains atoms with mixed residue indices:",
+                        residue_name[0]);
+      std::string indices = trajan::util::format_vector(residue_index, 78);
+      std::istringstream ss(indices);
+      std::string line;
+      while (std::getline(ss, line))
+        trajan::log::warn("  {}", line);
     }
     Molecule molecule(atoms);
     molecule.index = m_molecules.size();

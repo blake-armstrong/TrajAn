@@ -38,15 +38,10 @@ void DCDHandler::_finalise() {
 }
 
 bool DCDHandler::read_next_frame(Frame &frame) {
-  if (m_total_frames > 0 && m_current_frame >= m_total_frames) {
-    return false;
-  }
-
   bool success = this->parse_dcd(frame);
   if (success) {
     m_current_frame++;
   }
-
   return success;
 }
 
@@ -310,8 +305,7 @@ bool DCDHandler::_parse_dcd(core::Frame &frame) {
   if (m_is_charmm_format && m_has_extra_block) {
     std::vector<char> unitcell_buffer;
     if (!read_fortran_record(unitcell_buffer)) {
-      trajan::log::warn("Failed to read unit cell record");
-      return false;
+      return false; // normal EOF before unit cell record
     }
 
     // Parse unit cell data (6 doubles: a, b, c, alpha, beta, gamma)
@@ -364,7 +358,7 @@ bool DCDHandler::_parse_dcd(core::Frame &frame) {
   // Read X coordinates
   std::vector<char> coord_buffer;
   if (!read_fortran_record(coord_buffer)) {
-    throw std::runtime_error("Failed to read X coordinates");
+    return false; // normal EOF before X coordinate record
   }
 
   if (coord_buffer.size() != m_num_atoms * sizeof(float)) {

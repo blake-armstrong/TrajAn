@@ -1,4 +1,5 @@
 #include <map>
+#include <trajan/core/log.h>
 #include <trajan/main/trajan_info.h>
 
 namespace trajan::main {
@@ -84,180 +85,228 @@ void print_subsection(const std::string &title) {
                     make_separator(SEP_LIGHT, remaining));
 }
 
+struct UnitCellAccum {
+  double a{0}, b{0}, c{0}, alpha{0}, beta{0}, gamma{0}, volume{0};
+  size_t count{0};
+
+  void add(const occ::crystal::UnitCell &uc) {
+    a += uc.a(); b += uc.b(); c += uc.c();
+    alpha += uc.alpha(); beta += uc.beta(); gamma += uc.gamma();
+    volume += uc.volume();
+    ++count;
+  }
+};
+
 } // namespace
 
 void run_info_subcommand(const InfoOpts &opts, Trajectory &traj) {
 
-  while (traj.next_frame()) {
-    const auto uc = traj.unit_cell();
+  UnitCellAccum uc_accum;
 
-    // -- Unit Cell ----------------------------------------------------------
-    print_section_header("Unit Cell");
-    if (uc) {
-      const auto &ucv = uc.value();
-      constexpr size_t fw = 32; // fill column width
+  // Capture snapshot data from first frame, accumulate unit cell over all.
+  std::optional<occ::crystal::UnitCell> last_uc;
+  std::map<std::string, size_t> atom_type_count;
+  std::map<std::string, std::string> atom_type_elements;
+  double mass = 0.0;
+  size_t total_atoms = 0;
+  size_t frame_count = 0;
 
-      using occ::units::degrees;
-      print_field(fw, "lengths (a, b, c)",
-                  fmt::format("{:10.4f}  {:10.4f}  {:10.4f}", ucv.a(), ucv.b(),
-                              ucv.c()));
-      print_field(fw, "angles (alpha, beta, gamma)",
-                  fmt::format("{:10.4f}  {:10.4f}  {:10.4f}",
-                              degrees(ucv.alpha()), degrees(ucv.beta()),
-                              degrees(ucv.gamma())));
-      print_field(fw, "cell type", fmt::format("{}", ucv.cell_type()));
-      print_field(fw, "volume", fmt::format("{:.4f} A^3", ucv.volume()));
+  {
+    trajan::log::Progress progress("info: reading frames");
+    while (traj.next_frame()) {
+      ++frame_count;
+      progress.increment();
 
-      double area_bc = ucv.b() * ucv.c() * sin(ucv.alpha());
-      double area_ac = ucv.a() * ucv.c() * sin(ucv.beta());
-      double area_ab = ucv.a() * ucv.b() * sin(ucv.gamma());
-      print_field(
-          fw, "surface area",
-          fmt::format("{:.4f} A^2", 2.0 * (area_bc + area_ac + area_ab)));
-
-      std::array<std::string, 3> labels{"a", "b", "c"};
-
-      print_subsection("Direct lattice vectors");
-      const auto &dt = ucv.direct();
-      for (size_t i = 0; i < 3; i++) {
-        const auto v = dt.col(i);
-        print_field(
-            fw, fmt::format("({})", labels[i]),
-            fmt::format("{:10.4f}  {:10.4f}  {:10.4f}", v(0), v(1), v(2)));
+      const auto uc = traj.unit_cell();
+      if (uc) {
+        uc_accum.add(uc.value());
+        last_uc = uc;
       }
 
-      print_subsection("Reciprocal lattice vectors");
-      const auto &rt = ucv.reciprocal();
-      for (size_t i = 0; i < 3; i++) {
-        const auto v = rt.col(i);
-        print_field(
-            fw, fmt::format("({}*)", labels[i]),
-            fmt::format("{:10.4f}  {:10.4f}  {:10.4f}", v(0), v(1), v(2)));
+      // Composition and topology only need one frame — use the first.
+      if (frame_count == 1) {
+        atom_type_count.clear();
+        atom_type_elements.clear();
+        mass = 0.0;
+        total_atoms = traj.atoms().size();
+        for (const auto &a : traj.atoms()) {
+          atom_type_count[a.type]++;
+          atom_type_elements[a.type] = a.element.symbol();
+          mass += a.element.mass();
+        }
       }
-    } else {
-      trajan::log::info("  |  No unit cell information available.");
     }
-    print_section_footer();
+    progress.finish(fmt::format("info: processed {} frame(s)", frame_count));
+  }
 
-    // -- Composition --------------------------------------------------------
-    print_section_header("Composition");
+  if (frame_count == 0) {
+    trajan::log::warn("info: no frames available");
+    return;
+  }
 
-    std::map<std::string, size_t> atom_type_count;
-    std::map<std::string, std::string> atom_type_elements;
-    double mass = 0.0;
-    size_t total_atoms = traj.atoms().size();
+  // -- Unit Cell (averaged) -------------------------------------------------
+  print_section_header(frame_count > 1 ? "Unit Cell (averaged over all frames)"
+                                       : "Unit Cell");
+  if (uc_accum.count > 0) {
+    const double n = static_cast<double>(uc_accum.count);
+    const double a     = uc_accum.a / n;
+    const double b     = uc_accum.b / n;
+    const double c     = uc_accum.c / n;
+    const double alpha = uc_accum.alpha / n;
+    const double beta  = uc_accum.beta  / n;
+    const double gamma = uc_accum.gamma / n;
+    const double vol   = uc_accum.volume / n;
 
-    for (const auto &a : traj.atoms()) {
-      atom_type_count[a.type]++;
-      atom_type_elements[a.type] = a.element.symbol();
-      mass += a.element.mass();
-    }
+    // Rebuild an averaged unit cell for derived quantities.
+    const occ::crystal::UnitCell avg_uc =
+        occ::crystal::triclinic_cell(a, b, c, alpha, beta, gamma);
 
     constexpr size_t fw = 32;
-    print_field(fw, "total atoms", fmt::format("{}", total_atoms));
-    print_field(fw, "total mass", fmt::format("{:.4f} g/mol", mass));
-    if (uc) {
-      print_field(
-          fw, "mass density",
-          fmt::format("{:.4f} g/cm^3", mass / uc->volume() * 1.6605388));
-      print_field(fw, "number density",
-                  fmt::format("{:.4f} atom/A^3", total_atoms / uc->volume()));
+    using occ::units::degrees;
+    print_field(fw, "lengths (a, b, c)",
+                fmt::format("{:10.4f}  {:10.4f}  {:10.4f}", a, b, c));
+    print_field(fw, "angles (alpha, beta, gamma)",
+                fmt::format("{:10.4f}  {:10.4f}  {:10.4f}",
+                            degrees(alpha), degrees(beta), degrees(gamma)));
+    print_field(fw, "cell type", fmt::format("{}", avg_uc.cell_type()));
+    print_field(fw, "volume", fmt::format("{:.4f} A^3", vol));
+
+    double area_bc = b * c * sin(alpha);
+    double area_ac = a * c * sin(beta);
+    double area_ab = a * b * sin(gamma);
+    print_field(fw, "surface area",
+                fmt::format("{:.4f} A^2", 2.0 * (area_bc + area_ac + area_ab)));
+
+    std::array<std::string, 3> labels{"a", "b", "c"};
+
+    print_subsection("Direct lattice vectors");
+    const auto &dt = avg_uc.direct();
+    for (size_t i = 0; i < 3; i++) {
+      const auto v = dt.col(i);
+      print_field(fw, fmt::format("({})", labels[i]),
+                  fmt::format("{:10.4f}  {:10.4f}  {:10.4f}", v(0), v(1), v(2)));
     }
 
-    print_subsection("Atom types");
-    trajan::log::info("  |  {:>8}  {:>4}  {:>10}", "type", "elem", "count");
-    trajan::log::info("  |  {:>8}  {:>4}  {:>10}", "--------", "----",
-                      "----------");
-    for (const auto &[at, count] : atom_type_count) {
-      trajan::log::info("  |  {:>8}  {:>4}  {:>10}", at, atom_type_elements[at],
-                        count);
+    print_subsection("Reciprocal lattice vectors");
+    const auto &rt = avg_uc.reciprocal();
+    for (size_t i = 0; i < 3; i++) {
+      const auto v = rt.col(i);
+      print_field(fw, fmt::format("({}*)", labels[i]),
+                  fmt::format("{:10.4f}  {:10.4f}  {:10.4f}", v(0), v(1), v(2)));
     }
-    print_section_footer();
+  } else {
+    trajan::log::info("  |  No unit cell information available.");
+  }
+  print_section_footer();
 
-    // -- Topology -----------------------------------------------------------
-    print_section_header("Topology");
-    core::Topology &top = traj.get_topology();
-    top.print_summary();
-    print_section_footer();
+  // -- Composition (from first frame) ---------------------------------------
+  print_section_header("Composition");
+  constexpr size_t fw = 32;
+  print_field(fw, "total atoms", fmt::format("{}", total_atoms));
+  print_field(fw, "total mass", fmt::format("{:.4f} g/mol", mass));
+  if (uc_accum.count > 0) {
+    const double avg_vol = uc_accum.volume / static_cast<double>(uc_accum.count);
+    print_field(fw, "mass density",
+                fmt::format("{:.4f} g/cm^3", mass / avg_vol * 1.6605388));
+    print_field(fw, "number density",
+                fmt::format("{:.4f} atom/A^3", total_atoms / avg_vol));
+  }
 
-    // -- Molecules ----------------------------------------------------------
-    auto &molecules = top.get_molecules();
-    if (molecules.size() > 0) {
-      print_section_header("Molecules");
+  print_subsection("Atom types");
+  trajan::log::info("  |  {:>8}  {:>4}  {:>10}", "type", "elem", "count");
+  trajan::log::info("  |  {:>8}  {:>4}  {:>10}", "--------", "----",
+                    "----------");
+  for (const auto &[at, count] : atom_type_count) {
+    trajan::log::info("  |  {:>8}  {:>4}  {:>10}", at, atom_type_elements[at],
+                      count);
+  }
+  print_section_footer();
 
-      ankerl::unordered_dense::map<std::string, size_t> unique_molecules;
-      ankerl::unordered_dense::map<std::string, size_t> unique_molecule_counts;
+  // -- Topology (from last frame) -------------------------------------------
+  print_section_header("Topology");
+  core::Topology &top = traj.get_topology();
+  constexpr size_t tfw = 32;
+  print_field(tfw, "atoms",              fmt::format("{}", top.num_atoms()));
+  print_field(tfw, "bonds",              fmt::format("{}", top.num_bonds()));
+  print_field(tfw, "angles",             fmt::format("{}", top.num_angles()));
+  print_field(tfw, "proper dihedrals",   fmt::format("{}", top.num_proper_dihedrals()));
+  print_field(tfw, "improper dihedrals", fmt::format("{}", top.num_improper_dihedrals()));
+  print_section_footer();
 
-      for (const auto &m : molecules) {
-        trajan::log::debug("  {}", m.repr());
-        unique_molecules[m.type] = m.index;
-        unique_molecule_counts[m.type]++;
+  // -- Molecules ------------------------------------------------------------
+  auto &molecules = top.get_molecules();
+  if (molecules.size() > 0) {
+    print_section_header("Molecules");
+
+    ankerl::unordered_dense::map<std::string, size_t> unique_molecules;
+    ankerl::unordered_dense::map<std::string, size_t> unique_molecule_counts;
+
+    for (const auto &m : molecules) {
+      trajan::log::debug("  {}", m.repr());
+      unique_molecules[m.type] = m.index;
+      unique_molecule_counts[m.type]++;
+    }
+
+    const double avg_vol = uc_accum.count > 0
+                               ? uc_accum.volume / static_cast<double>(uc_accum.count)
+                               : 0.0;
+    constexpr size_t mfw = 42;
+
+    bool first = true;
+    for (const auto &[t, i] : unique_molecules) {
+      const auto &m = molecules[i];
+      const size_t count = unique_molecule_counts[t];
+
+      if (!first)
+        trajan::log::info("  |");
+      first = false;
+
+      const std::string mol_prefix = "  |  +- Molecule type: ";
+      const size_t mol_remaining = SEP_WIDTH - mol_prefix.size() - t.size() - 1;
+      trajan::log::info("{}{} {}", mol_prefix, t,
+                        make_separator(SEP_LIGHT, mol_remaining));
+
+      auto mfield = [&](const std::string &label, const std::string &value) {
+        print_field(mfw, label, value, "  |  |  ");
+      };
+
+      mfield("count", fmt::format("{}", count));
+      mfield("atoms per molecule", fmt::format("{}", m.atoms().size()));
+
+      auto atom_types_vec = m.atom_types();
+      std::sort(atom_types_vec.begin(), atom_types_vec.end());
+      print_wrapped_field(mfw, "atom types", atom_types_vec, "  |  |  ");
+
+      auto elements_vec = m.element_symbols();
+      std::sort(elements_vec.begin(), elements_vec.end());
+      if (atom_types_vec != elements_vec)
+        print_wrapped_field(mfw, "elements", elements_vec, "  |  |  ");
+
+      mfield("molar mass", fmt::format("{:.4f} g/mol", m.molar_mass() * 1e3));
+
+      if (avg_vol > 0.0) {
+        mfield("concentration",
+               fmt::format("{:.4f} mol/L", count / avg_vol * 1660.5388));
+        mfield("mass fraction",
+               fmt::format("{:.4f} %m/m", count * m.molar_mass() * 1e5 / mass));
       }
 
-      constexpr size_t mfw = 42; // fill column width inside molecule block
+      const double T = 300;
+      mfield(fmt::format("translational dG (@ {} K)", T),
+             fmt::format("{:.4f} kJ/mol", m.translational_free_energy(T)));
+      mfield(fmt::format("rotational dG (@ {} K)", T),
+             fmt::format("{:.4f} kJ/mol", m.rotational_free_energy(T)));
 
-      bool first = true;
-      for (const auto &[t, i] : unique_molecules) {
-        const auto &m = molecules[i];
-        const size_t count = unique_molecule_counts[t];
-
-        if (!first) {
-          trajan::log::info("  |");
-        }
-        first = false;
-
-        // Sub-molecule header
-        const std::string mol_prefix = "  |  +- Molecule type: ";
-        const size_t mol_remaining =
-            SEP_WIDTH - mol_prefix.size() - t.size() - 1;
-        trajan::log::info("{}{} {}", mol_prefix, t,
-                          make_separator(SEP_LIGHT, mol_remaining));
-
-        auto mfield = [&](const std::string &label, const std::string &value) {
-          print_field(mfw, label, value, "  |  |  ");
-        };
-
-        mfield("count", fmt::format("{}", count));
-        mfield("atoms per molecule", fmt::format("{}", m.atoms().size()));
-
-        auto atom_types_vec = m.atom_types();
-        std::sort(atom_types_vec.begin(), atom_types_vec.end());
-        print_wrapped_field(mfw, "atom types", atom_types_vec, "  |  |  ");
-
-        auto elements_vec = m.element_symbols();
-        std::sort(elements_vec.begin(), elements_vec.end());
-        if (atom_types_vec != elements_vec) {
-          print_wrapped_field(mfw, "elements", elements_vec, "  |  |  ");
-        }
-
-        mfield("molar mass", fmt::format("{:.4f} g/mol", m.molar_mass() * 1e3));
-
-        if (uc) {
-          const double v = uc->volume();
-          mfield("concentration",
-                 fmt::format("{:.4f} mol/L", count / v * 1660.5388));
-          mfield(
-              "mass fraction",
-              fmt::format("{:.4f} %m/m", count * m.molar_mass() * 1e5 / mass));
-        }
-
-        const double T = 300;
-        mfield(fmt::format("translational dG (@ {} K)", T),
-               fmt::format("{:.4f} kJ/mol", m.translational_free_energy(T)));
-        mfield(fmt::format("rotational dG (@ {} K)", T),
-               fmt::format("{:.4f} kJ/mol", m.rotational_free_energy(T)));
-
-        trajan::log::info("  |  +{}", make_separator(SEP_LIGHT, SEP_WIDTH - 7));
-      }
-      print_section_footer();
+      trajan::log::info("  |  +{}", make_separator(SEP_LIGHT, SEP_WIDTH - 7));
     }
+    print_section_footer();
+  }
 
-    if (opts.detailed_top) {
-      print_section_header("Detailed Topology");
-      traj.frame().populate_angles(top);
-      top.print_detailed();
-      print_section_footer();
-    }
+  if (opts.detailed_top) {
+    print_section_header("Detailed Topology");
+    traj.frame().populate_angles(top);
+    top.print_detailed();
+    print_section_footer();
   }
 };
 
