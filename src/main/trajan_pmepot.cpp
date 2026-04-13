@@ -4,11 +4,14 @@
 #include <trajan/main/trajan_pmepot.h>
 
 #include <occ/3rdparty/pocketfft.h>
+#include <occ/core/constants.h>
 #include <occ/crystal/unitcell.h>
 
+#include <algorithm>
 #include <cmath>
 #include <complex>
 #include <fstream>
+#include <sstream>
 #include <stdexcept>
 #include <vector>
 
@@ -90,9 +93,12 @@ static void write_dx(const std::string &path, const std::vector<double> &data,
   const occ::Vec3 db = uc.b_vector() / static_cast<double>(Nb);
   const occ::Vec3 dc = uc.c_vector() / static_cast<double>(Nc);
 
+  f << "# PME electrostatic potential (Volts)\n";
   f << "object 1 class gridpositions counts " << Na << " " << Nb << " " << Nc
     << "\n";
-  f << "origin 0.0 0.0 0.0\n";
+  // VMD centers the grid at Cartesian (0,0,0): origin = -((Na-1)/2*da + (Nb-1)/2*db + (Nc-1)/2*dc)
+  const occ::Vec3 origin = -(da * ((Na - 1) * 0.5) + db * ((Nb - 1) * 0.5) + dc * ((Nc - 1) * 0.5));
+  f << "origin " << origin[0] << " " << origin[1] << " " << origin[2] << "\n";
   f << "delta " << da[0] << " " << da[1] << " " << da[2] << "\n";
   f << "delta " << db[0] << " " << db[1] << " " << db[2] << "\n";
   f << "delta " << dc[0] << " " << dc[1] << " " << dc[2] << "\n";
@@ -143,8 +149,9 @@ struct PmepotGrid {
     const double V = uc.volume();
     const double four_pi_ke_over_V = 4.0 * PI * KE / V;
     const double inv_4b2 = 1.0 / (4.0 * beta * beta);
-    // Reciprocal matrix: column j is b*_j in Å⁻¹
-    const occ::Mat3 recip = uc.reciprocal();
+    // OCC reciprocal() uses the crystallographic convention (no 2π factor).
+    // PME requires physics wavevectors k = 2π·g, so multiply by 2π.
+    const occ::Mat3 recip = uc.reciprocal() * occ::constants::two_pi<double>;
 
     // Precompute per-axis B-spline correction factors.
     std::vector<double> Ba(Na), Bb(Nb), Bc(Nc2);
@@ -200,9 +207,11 @@ struct PmepotGrid {
       // Wrap into [0,1) along each axis.
       frac = frac.array() - frac.array().floor();
 
-      const double wa = frac[0] * Na;
-      const double wb = frac[1] * Nb;
-      const double wc = frac[2] * Nc;
+      // Shift by (N-1)/2 so that grid index 0 corresponds to the VMD origin.
+      // This matches VMD's convention: origin = -((Na-1)/2*da + ...).
+      const double wa = frac[0] * Na + (Na - 1) * 0.5;
+      const double wb = frac[1] * Nb + (Nb - 1) * 0.5;
+      const double wc = frac[2] * Nc + (Nc - 1) * 0.5;
 
       const auto wts_a = bspline_weights(wa, order);
       const auto wts_b = bspline_weights(wb, order);
@@ -247,8 +256,10 @@ struct PmepotGrid {
     for (size_t i = 0; i < Qk.size(); ++i)
       Qk[i] *= green[i];
 
-    // Inverse complex-to-real, with 1/N normalisation.
-    const float fct = 1.0f / static_cast<float>(Na * Nb * Nc);
+    // G already carries 1/V; the IDFT should not apply an additional 1/N.
+    // Using fct=1 gives the unnormalized sum that matches the continuous formula
+    // φ(r) = (1/V) Σ_m G(k_m)·Q̃(m)·exp(ik_m·r) where G = 4πke/V·exp(…)/k².
+    const float fct = 1.0f;
     std::vector<float> phi(Na * Nb * Nc);
     pocketfft::c2r(shape_r, stride_c, stride_r, {0, 1, 2}, false,
                    Qk.data(), phi.data(), fct);
@@ -327,13 +338,21 @@ void run_pmepot_subcommand(const PmepotOpts &opts, Trajectory &traj,
     grid.fft_and_accumulate();
   };
 
+  trajan::log::Progress progress("pmepot: frames processed");
+
   pipeline.apply(frame);
   process_frame(frame);
+  if (grid.frame_count % 100 == 0)
+    progress.update(static_cast<int64_t>(grid.frame_count));
+
   while (traj.next_frame()) {
     pipeline.apply(traj.frame());
     process_frame(traj.frame());
+    if (grid.frame_count % 100 == 0)
+      progress.update(static_cast<int64_t>(grid.frame_count));
   }
 
+  progress.finish(fmt::format("pmepot: averaged over {} frame(s)", grid.frame_count));
   trajan::log::info("pmepot: averaged over {} frame(s)", grid.frame_count);
 
   const auto avg = grid.average();
@@ -377,6 +396,405 @@ CLI::App *add_pmepot_subcommand(CLI::App &app, Trajectory &traj,
     if (opts->order < 2)
       throw std::invalid_argument("pmepot: --order must be >= 2");
     run_pmepot_subcommand(*opts, traj, pipeline);
+  });
+
+  return cmd;
+}
+
+// ── DX reader ─────────────────────────────────────────────────────────────
+
+struct DXGrid {
+  size_t Na{0}, Nb{0}, Nc{0};
+  occ::Vec3 origin{0, 0, 0};
+  occ::Vec3 da{0, 0, 0}, db{0, 0, 0}, dc{0, 0, 0};
+  std::vector<double> data; // Na*Nb*Nc row-major [ia][ib][ic]
+
+  double at(size_t ia, size_t ib, size_t ic) const {
+    return data[ia * Nb * Nc + ib * Nc + ic];
+  }
+};
+
+static DXGrid read_dx(const std::string &path) {
+  std::ifstream f(path);
+  if (!f)
+    throw std::runtime_error("dxreduce: cannot open file: " + path);
+
+  DXGrid g;
+  std::string line;
+  int delta_count = 0;
+  bool reading_data = false;
+  size_t data_expected = 0, data_read = 0;
+
+  while (std::getline(f, line)) {
+    if (line.empty() || line[0] == '#')
+      continue;
+
+    if (!reading_data) {
+      if (line.find("object 1 class gridpositions counts") != std::string::npos) {
+        std::sscanf(line.c_str(),
+                    "object 1 class gridpositions counts %zu %zu %zu",
+                    &g.Na, &g.Nb, &g.Nc);
+      } else if (line.substr(0, 6) == "origin") {
+        std::sscanf(line.c_str(), "origin %lf %lf %lf",
+                    &g.origin[0], &g.origin[1], &g.origin[2]);
+      } else if (line.substr(0, 5) == "delta") {
+        if (delta_count == 0)
+          std::sscanf(line.c_str(), "delta %lf %lf %lf",
+                      &g.da[0], &g.da[1], &g.da[2]);
+        else if (delta_count == 1)
+          std::sscanf(line.c_str(), "delta %lf %lf %lf",
+                      &g.db[0], &g.db[1], &g.db[2]);
+        else
+          std::sscanf(line.c_str(), "delta %lf %lf %lf",
+                      &g.dc[0], &g.dc[1], &g.dc[2]);
+        ++delta_count;
+      } else if (line.find("data follows") != std::string::npos) {
+        auto p = line.find("items");
+        if (p != std::string::npos)
+          data_expected = std::stoul(line.substr(p + 6));
+        if (data_expected == 0)
+          data_expected = g.Na * g.Nb * g.Nc;
+        g.data.resize(data_expected, 0.0);
+        reading_data = true;
+      }
+    } else {
+      std::istringstream iss(line);
+      double v;
+      while (iss >> v && data_read < data_expected)
+        g.data[data_read++] = v;
+      if (data_read >= data_expected)
+        break;
+    }
+  }
+
+  if (g.Na == 0 || g.Nb == 0 || g.Nc == 0)
+    throw std::runtime_error("dxreduce: failed to read grid dimensions from " + path);
+  if (data_read != data_expected)
+    throw std::runtime_error(
+        fmt::format("dxreduce: expected {} data values, got {}", data_expected, data_read));
+
+  return g;
+}
+
+// ── Axis averaging & Cartesian rebinning ──────────────────────────────────
+
+enum class AxisType { Lattice, Cartesian };
+
+struct ParsedAxes {
+  AxisType type;
+  std::vector<int> indices; // 0=a/x, 1=b/y, 2=c/z
+};
+
+// Parse "a","bc","xyz" etc. Disallows mixing lattice and Cartesian labels.
+static ParsedAxes parse_axes(const std::string &s) {
+  bool has_cart = s.find_first_of("xyz") != std::string::npos;
+  bool has_latt = s.find_first_of("abc") != std::string::npos;
+  if (has_cart && has_latt)
+    throw std::invalid_argument(
+        "dxreduce: cannot mix a/b/c and x/y/z in --average");
+  std::vector<int> axes;
+  for (char c : s) {
+    if (c == 'a' || c == 'x')      axes.push_back(0);
+    else if (c == 'b' || c == 'y') axes.push_back(1);
+    else if (c == 'c' || c == 'z') axes.push_back(2);
+    else
+      throw std::invalid_argument(
+          fmt::format("dxreduce: unknown axis '{}' (use a,b,c or x,y,z)", c));
+  }
+  std::sort(axes.begin(), axes.end());
+  axes.erase(std::unique(axes.begin(), axes.end()), axes.end());
+  return {has_cart ? AxisType::Cartesian : AxisType::Lattice, axes};
+}
+
+// True when all three delta vectors are axis-aligned (orthogonal cell).
+// In that case Cartesian x/y/z maps 1-to-1 onto lattice a/b/c.
+static bool is_orthogonal(const DXGrid &g, double tol = 1e-6) {
+  return std::abs(g.da[1]) < tol && std::abs(g.da[2]) < tol &&
+         std::abs(g.db[0]) < tol && std::abs(g.db[2]) < tol &&
+         std::abs(g.dc[0]) < tol && std::abs(g.dc[1]) < tol;
+}
+
+// Fast lattice-axis averaging (exact, no rebinning).
+static std::pair<std::vector<double>, std::vector<int>>
+average_lattice_axes(const DXGrid &g, const std::vector<int> &avg_axes) {
+  std::vector<int> remain;
+  for (int k = 0; k < 3; ++k)
+    if (std::find(avg_axes.begin(), avg_axes.end(), k) == avg_axes.end())
+      remain.push_back(k);
+
+  const size_t Ns[3] = {g.Na, g.Nb, g.Nc};
+  size_t out_size = 1;
+  for (int r : remain) out_size *= Ns[r];
+
+  double denom = 1.0;
+  for (int k : avg_axes) denom *= static_cast<double>(Ns[k]);
+
+  std::vector<double> result(out_size, 0.0);
+  for (size_t ia = 0; ia < g.Na; ++ia) {
+    for (size_t ib = 0; ib < g.Nb; ++ib) {
+      for (size_t ic = 0; ic < g.Nc; ++ic) {
+        const size_t idx[3] = {ia, ib, ic};
+        size_t out_idx = 0;
+        for (size_t r = 0; r < remain.size(); ++r) {
+          size_t stride = 1;
+          for (size_t s = r + 1; s < remain.size(); ++s)
+            stride *= Ns[remain[s]];
+          out_idx += idx[remain[r]] * stride;
+        }
+        result[out_idx] += g.at(ia, ib, ic);
+      }
+    }
+  }
+  for (double &v : result) v /= denom;
+  return {result, remain};
+}
+
+// Cartesian rebinning for non-orthogonal cells.
+// Projects each grid point onto the remaining Cartesian axis/axes, bins by
+// the finest grid step along that direction, then averages within bins.
+// Returns (values, pos0_vec, pos1_vec, N0, N1).
+// For 1D: N1=1, pos1_vec is empty.
+struct CartRebin {
+  std::vector<double> values;
+  std::vector<double> pos0, pos1;
+  size_t N0{0}, N1{1};
+};
+
+static CartRebin rebin_cartesian(const DXGrid &g, const std::vector<int> &rem_cart) {
+  const occ::Vec3 *deltas[3] = {&g.da, &g.db, &g.dc};
+  const bool is_2d = (rem_cart.size() == 2);
+  const int ax0 = rem_cart[0];
+  const int ax1 = is_2d ? rem_cart[1] : -1;
+
+  // Finest non-zero step contribution along a Cartesian axis.
+  auto finest_step = [&](int cart_ax) {
+    double step = std::numeric_limits<double>::max();
+    for (int k = 0; k < 3; ++k) {
+      double c = std::abs((*deltas[k])[cart_ax]);
+      if (c > 1e-10) step = std::min(step, c);
+    }
+    return step;
+  };
+
+  auto cart_coord = [&](size_t ia, size_t ib, size_t ic, int cart_ax) {
+    return ia * (*deltas[0])[cart_ax] +
+           ib * (*deltas[1])[cart_ax] +
+           ic * (*deltas[2])[cart_ax];
+  };
+
+  const double step0 = finest_step(ax0);
+  const double step1 = is_2d ? finest_step(ax1) : 1.0;
+
+  // Find coordinate ranges by visiting all grid points.
+  double mn0 = std::numeric_limits<double>::max(), mx0 = std::numeric_limits<double>::lowest();
+  double mn1 = std::numeric_limits<double>::max(), mx1 = std::numeric_limits<double>::lowest();
+  for (size_t ia = 0; ia < g.Na; ++ia) {
+    for (size_t ib = 0; ib < g.Nb; ++ib) {
+      for (size_t ic = 0; ic < g.Nc; ++ic) {
+        double p0 = cart_coord(ia, ib, ic, ax0);
+        mn0 = std::min(mn0, p0); mx0 = std::max(mx0, p0);
+        if (is_2d) {
+          double p1 = cart_coord(ia, ib, ic, ax1);
+          mn1 = std::min(mn1, p1); mx1 = std::max(mx1, p1);
+        }
+      }
+    }
+  }
+
+  const size_t N0 = static_cast<size_t>(std::round((mx0 - mn0) / step0)) + 1;
+  const size_t N1 = is_2d ? static_cast<size_t>(std::round((mx1 - mn1) / step1)) + 1 : 1;
+
+  std::vector<double> sums(N0 * N1, 0.0);
+  std::vector<size_t> counts(N0 * N1, 0);
+
+  for (size_t ia = 0; ia < g.Na; ++ia) {
+    for (size_t ib = 0; ib < g.Nb; ++ib) {
+      for (size_t ic = 0; ic < g.Nc; ++ic) {
+        double p0 = cart_coord(ia, ib, ic, ax0);
+        size_t b0 = static_cast<size_t>(std::round((p0 - mn0) / step0));
+        size_t b1 = 0;
+        if (is_2d) {
+          double p1 = cart_coord(ia, ib, ic, ax1);
+          b1 = static_cast<size_t>(std::round((p1 - mn1) / step1));
+        }
+        if (b0 < N0 && b1 < N1) {
+          sums[b0 * N1 + b1] += g.at(ia, ib, ic);
+          ++counts[b0 * N1 + b1];
+        }
+      }
+    }
+  }
+
+  std::vector<double> values(N0 * N1, 0.0);
+  for (size_t i = 0; i < N0 * N1; ++i)
+    values[i] = counts[i] > 0 ? sums[i] / static_cast<double>(counts[i]) : 0.0;
+
+  std::vector<double> p0v(N0), p1v(is_2d ? N1 : 0);
+  for (size_t i = 0; i < N0; ++i) p0v[i] = mn0 + i * step0;
+  for (size_t i = 0; i < N1 && is_2d; ++i) p1v[i] = mn1 + i * step1;
+
+  return {values, p0v, p1v, N0, N1};
+}
+
+// ── Output writers ─────────────────────────────────────────────────────────
+
+// Generic 1D writer: explicit position vector, arbitrary axis label.
+static void write_1d(const std::string &path,
+                     const std::vector<double> &positions,
+                     const std::vector<double> &values,
+                     const std::string &pos_label,
+                     const std::string &avg_label) {
+  std::ofstream f(path);
+  if (!f) throw std::runtime_error("dxreduce: cannot open output: " + path);
+  f << fmt::format("# dxreduce 1D: remaining axis {}\n", pos_label);
+  f << fmt::format("# averaged over: {}\n", avg_label);
+  f << "# pos(A)  potential(V)\n";
+  for (size_t i = 0; i < values.size(); ++i)
+    f << fmt::format("{:12.6f}  {:16.8f}\n", positions[i], values[i]);
+}
+
+// Generic 2D writer: gnuplot pm3d compatible, blank line between i0 blocks.
+static void write_2d(const std::string &path,
+                     const std::vector<double> &pos0,
+                     const std::vector<double> &pos1,
+                     const std::vector<double> &values,
+                     const std::string &label0,
+                     const std::string &label1,
+                     const std::string &avg_label) {
+  std::ofstream f(path);
+  if (!f) throw std::runtime_error("dxreduce: cannot open output: " + path);
+  const size_t N0 = pos0.size(), N1 = pos1.size();
+  f << fmt::format("# dxreduce 2D: axes {} {}\n", label0, label1);
+  f << fmt::format("# averaged over: {}\n", avg_label);
+  f << fmt::format("# N{}={}  N{}={}\n", label0, N0, label1, N1);
+  f << fmt::format("# pos_{}(A)  pos_{}(A)  potential(V)\n", label0, label1);
+  for (size_t i0 = 0; i0 < N0; ++i0) {
+    for (size_t i1 = 0; i1 < N1; ++i1)
+      f << fmt::format("{:12.6f}  {:12.6f}  {:16.8f}\n",
+                       pos0[i0], pos1[i1], values[i0 * N1 + i1]);
+    f << "\n";
+  }
+}
+
+// ── Subcommand ─────────────────────────────────────────────────────────────
+
+void run_dxreduce_subcommand(const DXReduceOpts &opts) {
+  trajan::log::info("dxreduce: reading {}", opts.infile);
+  const DXGrid g = read_dx(opts.infile);
+  trajan::log::info("dxreduce: grid {}×{}×{}", g.Na, g.Nb, g.Nc);
+
+  if (opts.average_axes.empty())
+    throw std::invalid_argument("dxreduce: --average must specify at least one axis");
+
+  const auto [atype, avg_idx] = parse_axes(opts.average_axes);
+  if (avg_idx.size() >= 3)
+    throw std::invalid_argument("dxreduce: cannot average all three axes (nothing to write)");
+
+  // Determine remaining axis indices and labels.
+  std::vector<int> rem_idx;
+  for (int k = 0; k < 3; ++k)
+    if (std::find(avg_idx.begin(), avg_idx.end(), k) == avg_idx.end())
+      rem_idx.push_back(k);
+
+  const char *latt_names[3] = {"a", "b", "c"};
+  const char *cart_names[3] = {"x", "y", "z"};
+  const bool cart = (atype == AxisType::Cartesian);
+
+  // Build human-readable label strings.
+  auto axis_label = [&](int k) { return cart ? cart_names[k] : latt_names[k]; };
+  std::string avg_str, rem_str;
+  for (int k : avg_idx) avg_str += axis_label(k);
+  for (int k : rem_idx) rem_str += axis_label(k);
+
+  trajan::log::info("dxreduce: averaging over {} → {}D output along {}",
+                    avg_str, rem_idx.size(), rem_str);
+
+  if (!cart) {
+    // ── Lattice axes: fast exact path ────────────────────────────────────
+    auto [data, remain] = average_lattice_axes(g, avg_idx);
+
+    const occ::Vec3 *deltas[3] = {&g.da, &g.db, &g.dc};
+    const size_t Ns[3] = {g.Na, g.Nb, g.Nc};
+
+    if (remain.size() == 1) {
+      const int r = remain[0];
+      const double step = deltas[r]->norm();
+      std::vector<double> pos(Ns[r]);
+      for (size_t i = 0; i < Ns[r]; ++i) pos[i] = i * step;
+      write_1d(opts.outfile, pos, data, latt_names[r], avg_str);
+    } else {
+      const int r0 = remain[0], r1 = remain[1];
+      const double s0 = deltas[r0]->norm(), s1 = deltas[r1]->norm();
+      std::vector<double> pos0(Ns[r0]), pos1(Ns[r1]);
+      for (size_t i = 0; i < Ns[r0]; ++i) pos0[i] = i * s0;
+      for (size_t i = 0; i < Ns[r1]; ++i) pos1[i] = i * s1;
+      write_2d(opts.outfile, pos0, pos1, data,
+               latt_names[r0], latt_names[r1], avg_str);
+    }
+  } else {
+    // ── Cartesian axes ────────────────────────────────────────────────────
+    if (is_orthogonal(g)) {
+      // Orthogonal cell: x=a, y=b, z=c — use the fast lattice path.
+      trajan::log::debug("dxreduce: orthogonal cell — Cartesian axes map directly to lattice axes");
+      auto [data, remain] = average_lattice_axes(g, avg_idx);
+      const occ::Vec3 *deltas[3] = {&g.da, &g.db, &g.dc};
+      const size_t Ns[3] = {g.Na, g.Nb, g.Nc};
+      if (remain.size() == 1) {
+        const int r = remain[0];
+        const double step = deltas[r]->norm();
+        std::vector<double> pos(Ns[r]);
+        for (size_t i = 0; i < Ns[r]; ++i) pos[i] = i * step;
+        write_1d(opts.outfile, pos, data, cart_names[r], avg_str);
+      } else {
+        const int r0 = remain[0], r1 = remain[1];
+        const double s0 = deltas[r0]->norm(), s1 = deltas[r1]->norm();
+        std::vector<double> pos0(Ns[r0]), pos1(Ns[r1]);
+        for (size_t i = 0; i < Ns[r0]; ++i) pos0[i] = i * s0;
+        for (size_t i = 0; i < Ns[r1]; ++i) pos1[i] = i * s1;
+        write_2d(opts.outfile, pos0, pos1, data,
+                 cart_names[r0], cart_names[r1], avg_str);
+      }
+    } else {
+      // Non-orthogonal cell: full Cartesian rebinning.
+      trajan::log::debug("dxreduce: non-orthogonal cell — rebinning grid points by Cartesian coordinate");
+      auto rb = rebin_cartesian(g, rem_idx);
+      if (rem_idx.size() == 1) {
+        write_1d(opts.outfile, rb.pos0, rb.values, cart_names[rem_idx[0]], avg_str);
+      } else {
+        write_2d(opts.outfile, rb.pos0, rb.pos1, rb.values,
+                 cart_names[rem_idx[0]], cart_names[rem_idx[1]], avg_str);
+      }
+    }
+  }
+
+  trajan::log::info("dxreduce: wrote {}D output to {}", rem_idx.size(), opts.outfile);
+}
+
+CLI::App *add_dxreduce_subcommand(CLI::App &app) {
+  CLI::App *cmd = app.add_subcommand(
+      "dxreduce",
+      "Load an OpenDX potential file and reduce its dimensionality by\n"
+      "averaging over one or two axes. Writes a 1D or 2D potential profile.\n"
+      "Supports both lattice axes (a,b,c) and Cartesian axes (x,y,z).");
+
+  auto opts = std::make_shared<DXReduceOpts>();
+  cmd->add_option("infile", opts->infile, "Input OpenDX file (.dx)")->required();
+  cmd->add_option("-o,--output", opts->outfile, "Output file")->required();
+  cmd->add_option(
+         "--average", opts->average_axes,
+         "Axes to collapse by averaging. Use lattice labels (a,b,c) or\n"
+         "Cartesian labels (x,y,z) — do not mix the two sets.\n"
+         "For orthogonal cells x=a, y=b, z=c (fast path).\n"
+         "For non-orthogonal cells, Cartesian averaging uses rebinning.\n"
+         "  --average c   → 2D map in the a-b plane\n"
+         "  --average ab  → 1D profile along c\n"
+         "  --average xy  → 1D profile along z\n"
+         "  --average z   → 2D map in the x-y plane")
+      ->required();
+
+  cmd->callback([opts]() {
+    trajan::log::set_subcommand_log_pattern("dxreduce");
+    run_dxreduce_subcommand(*opts);
   });
 
   return cmd;

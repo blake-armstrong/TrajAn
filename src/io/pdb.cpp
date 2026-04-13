@@ -307,7 +307,7 @@ bool PDBHandler::write_next_frame(const Frame &frame) {
                              atom.umolecule_index, ' ', "",
                              atom.x, atom.y, atom.z,
                              1.0, 0.0, "",
-                             atom.element.symbol(), "")
+                             atom.element.symbol(), atom.charge)
               << std::endl;
     i++;
   }

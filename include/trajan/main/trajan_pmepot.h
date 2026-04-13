@@ -23,4 +23,13 @@ void run_pmepot_subcommand(const PmepotOpts &opts, Trajectory &traj,
 CLI::App *add_pmepot_subcommand(CLI::App &app, Trajectory &traj,
                                 Pipeline &pipeline);
 
+struct DXReduceOpts {
+  std::string infile;
+  std::string outfile;
+  std::string average_axes; // e.g. "a", "bc", "ab" — axes to collapse by averaging
+};
+
+void run_dxreduce_subcommand(const DXReduceOpts &opts);
+CLI::App *add_dxreduce_subcommand(CLI::App &app);
+
 } // namespace trajan::main

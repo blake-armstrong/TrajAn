@@ -14,6 +14,7 @@
 #include <trajan/main/trajan_surface.h>
 #include <trajan/main/trajan_wrap.h>
 #include <trajan/main/trajan_write.h>
+#include <trajan/main/trajan_dipole.h>
 #include <trajan/main/version.h>
 
 int main(int argc, char *argv[]) {
@@ -50,6 +51,8 @@ int main(int argc, char *argv[]) {
   auto *surface = trajan::main::add_surface_subcommand(app, trajectory, pipeline);
   auto *wrap = trajan::main::add_wrap_subcommand(app, trajectory, pipeline);
   auto *write = trajan::main::add_write_subcommand(app, trajectory, pipeline);
+  auto *dipole = trajan::main::add_dipole_subcommand(app, trajectory, pipeline);
+  trajan::main::add_dxreduce_subcommand(app);
 
   modify->needs(load);
   pmepot->needs(load);

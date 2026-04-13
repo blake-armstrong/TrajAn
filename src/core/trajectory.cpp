@@ -111,29 +111,49 @@ bool Trajectory::_next_frame() {
   return false;
 }
 
+void Trajectory::set_slice(int begin, int end, int step) {
+  if (step <= 0)
+    throw std::invalid_argument("trajectory slice step must be >= 1");
+  m_slice_begin = begin;
+  m_slice_end = end;
+  m_slice_step = step;
+}
+
 bool Trajectory::next_frame() {
-  trajan::log::debug("Current frame index {}", m_current_frame_index);
-  bool next = this->_next_frame();
-  bool update_top = this->next_topology_update();
-  if (update_top) {
-    trajan::log::debug("Updating topology on frame {}", m_current_frame_index);
-    this->update_topology(m_topology_settings);
-  } else {
-    if (m_topology_settings.use_input_topology) {
-      m_topology = this->get_topology(m_topology_settings);
+  while (true) {
+    trajan::log::debug("Current frame index {}", m_current_frame_index);
+    bool next = this->_next_frame();
+
+    const int idx = static_cast<int>(m_current_frame_index);
+    m_current_frame_index++;
+
+    if (!next) {
+      this->reset();
+      if (m_frames_in_memory)
+        m_frame_loaded = true;
+      this->load_files(m_files);
+      return false;
     }
-    m_topology_has_changed = false;
+
+    // Apply slice filter: skip frames outside [begin, end) that don't hit step.
+    if (idx < m_slice_begin)
+      continue;
+    if (m_slice_end >= 0 && idx >= m_slice_end)
+      return false;
+    if ((idx - m_slice_begin) % m_slice_step != 0)
+      continue;
+
+    bool update_top = this->next_topology_update();
+    if (update_top) {
+      trajan::log::debug("Updating topology on frame {}", m_current_frame_index - 1);
+      this->update_topology(m_topology_settings);
+    } else {
+      if (m_topology_settings.use_input_topology)
+        m_topology = this->get_topology(m_topology_settings);
+      m_topology_has_changed = false;
+    }
+    return true;
   }
-  m_current_frame_index++;
-  if (next) {
-    return next;
-  }
-  this->reset();
-  if (m_frames_in_memory) {
-    m_frame_loaded = true;
-  }
-  this->load_files(m_files);
-  return next;
 }
 
 bool Trajectory::next_topology_update() {

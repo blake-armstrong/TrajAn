@@ -97,6 +97,11 @@ public:
 
   void set_topology_settings(const TopologyUpdateSettings &settings);
 
+  // Frame slice: only frames where index satisfies begin <= idx < end
+  // and (idx - begin) % step == 0 are returned. step must be >= 1.
+  // end == -1 means no upper bound.
+  void set_slice(int begin, int end, int step);
+
 private:
   bool _next_frame();
   bool m_guess_connectivity{true};
@@ -115,6 +120,10 @@ private:
   std::vector<Molecule> m_molecules{};
   bool m_topology_needs_update{true};
   bool m_topology_has_changed{true};
+  // Slice parameters (set via set_slice)
+  int m_slice_begin{0};
+  int m_slice_end{-1};   // -1 = no upper bound
+  int m_slice_step{1};
 };
 
 }; // namespace trajan::core
