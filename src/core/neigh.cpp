@@ -263,6 +263,128 @@ void CellList::update_impl(const CellListPacket &clp) {
   }
 }
 
+void CellList::initialize_region(const Vec3 &origin, const Vec3 &box_size,
+                                  const std::optional<UnitCell> &unit_cell) {
+  m_origin = origin;
+  clear_cells();
+  m_clp = CellListPacket{};
+  m_clp.unit_cell = unit_cell;
+  if (unit_cell.has_value()) {
+    const auto &uc = unit_cell.value();
+    Vec3 lattice_lengths(uc.a_vector().norm(), uc.b_vector().norm(),
+                         uc.c_vector().norm());
+    m_clp.side_lengths = lattice_lengths;
+    initialise_cells(lattice_lengths, GHOSTCELLS);
+  } else {
+    m_clp.side_lengths = box_size;
+    initialise_cells(box_size, 0);
+  }
+}
+
+bool CellList::has_clash(const Vec3 &pos) const {
+  Vec3 local = pos - m_origin;
+  int ia, ib, ic;
+  const int ng = static_cast<int>(m_params.num_ghosts);
+
+  if (m_clp.unit_cell.has_value()) {
+    const auto &uc = m_clp.unit_cell.value();
+    Vec3 frac = uc.to_fractional(local);
+    frac[0] -= std::floor(frac[0]);
+    frac[1] -= std::floor(frac[1]);
+    frac[2] -= std::floor(frac[2]);
+    local = uc.to_cartesian(frac);
+    ia = std::min(static_cast<int>(frac[0] * m_params.a), static_cast<int>(m_params.a) - 1);
+    ib = std::min(static_cast<int>(frac[1] * m_params.b), static_cast<int>(m_params.b) - 1);
+    ic = std::min(static_cast<int>(frac[2] * m_params.c), static_cast<int>(m_params.c) - 1);
+  } else {
+    ia = std::clamp(static_cast<int>(local[0] * m_params.a / m_clp.side_lengths[0]), 0, static_cast<int>(m_params.a) - 1);
+    ib = std::clamp(static_cast<int>(local[1] * m_params.b / m_clp.side_lengths[1]), 0, static_cast<int>(m_params.b) - 1);
+    ic = std::clamp(static_cast<int>(local[2] * m_params.c / m_clp.side_lengths[2]), 0, static_cast<int>(m_params.c) - 1);
+  }
+
+  const int adj = static_cast<int>(CELLDIVISOR);
+  const int total_a = static_cast<int>(m_params.total_a);
+  const int total_b = static_cast<int>(m_params.total_b);
+  const int total_c = static_cast<int>(m_params.total_c);
+  for (int da = -adj; da <= adj; ++da) {
+    const int na = ia + ng + da;
+    if (na < 0 || na >= total_a) continue;
+    for (int db = -adj; db <= adj; ++db) {
+      const int nb = ib + ng + db;
+      if (nb < 0 || nb >= total_b) continue;
+      for (int dc = -adj; dc <= adj; ++dc) {
+        const int nc = ic + ng + dc;
+        if (nc < 0 || nc >= total_c) continue;
+        for (const Entity &e : cell_at(na, nb, nc).get_entities()) {
+          const double dx = local[0] - e.x, dy = local[1] - e.y,
+                       dz = local[2] - e.z;
+          if (dx * dx + dy * dy + dz * dz <= m_cutoffsq)
+            return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+void CellList::insert_point(const Vec3 &pos, int index) {
+  Vec3 local = pos - m_origin;
+
+  if (m_clp.unit_cell.has_value()) {
+    const auto &uc = m_clp.unit_cell.value();
+    Vec3 frac = uc.to_fractional(local);
+    frac[0] -= std::floor(frac[0]);
+    frac[1] -= std::floor(frac[1]);
+    frac[2] -= std::floor(frac[2]);
+    Vec3 wrapped_cart = uc.to_cartesian(frac);
+    const int ind_a = std::min(static_cast<int>(frac[0] * m_params.a), static_cast<int>(m_params.a) - 1);
+    const int ind_b = std::min(static_cast<int>(frac[1] * m_params.b), static_cast<int>(m_params.b) - 1);
+    const int ind_c = std::min(static_cast<int>(frac[2] * m_params.c), static_cast<int>(m_params.c) - 1);
+
+    cell_at(ind_a + m_params.num_ghosts, ind_b + m_params.num_ghosts,
+            ind_c + m_params.num_ghosts)
+        .add_entity(index, wrapped_cart, Entity::Type::Atom);
+
+    if (ind_a >= static_cast<int>(m_params.num_ghosts) &&
+        ind_a < static_cast<int>(m_params.a_upper) &&
+        ind_b >= static_cast<int>(m_params.num_ghosts) &&
+        ind_b < static_cast<int>(m_params.b_upper) &&
+        ind_c >= static_cast<int>(m_params.num_ghosts) &&
+        ind_c < static_cast<int>(m_params.c_upper))
+      return;
+
+    const int a = (ind_a < static_cast<int>(m_params.num_ghosts))
+                      ? 1
+                      : (ind_a >= static_cast<int>(m_params.a_upper) ? -1 : 0);
+    const int b = (ind_b < static_cast<int>(m_params.num_ghosts))
+                      ? 1
+                      : (ind_b >= static_cast<int>(m_params.b_upper) ? -1 : 0);
+    const int c = (ind_c < static_cast<int>(m_params.num_ghosts))
+                      ? 1
+                      : (ind_c >= static_cast<int>(m_params.c_upper) ? -1 : 0);
+    const auto &direct_matrix = uc.direct();
+    for (int ia = 0; ia <= std::abs(a); ++ia) {
+      for (int ib = 0; ib <= std::abs(b); ++ib) {
+        for (int ic = 0; ic <= std::abs(c); ++ic) {
+          if (ia == 0 && ib == 0 && ic == 0) continue;
+          const int a_shift = ia * a, b_shift = ib * b, c_shift = ic * c;
+          Vec3 shift = direct_matrix * Vec3(a_shift, b_shift, c_shift);
+          Vec3 ghost_pos = wrapped_cart + shift;
+          cell_at(ind_a + a_shift * m_params.a + m_params.num_ghosts,
+                  ind_b + b_shift * m_params.b + m_params.num_ghosts,
+                  ind_c + c_shift * m_params.c + m_params.num_ghosts)
+              .add_entity(index, ghost_pos, Entity::Type::Atom);
+        }
+      }
+    }
+  } else {
+    const int ia = std::clamp(static_cast<int>(local[0] * m_params.a / m_clp.side_lengths[0]), 0, static_cast<int>(m_params.a) - 1);
+    const int ib = std::clamp(static_cast<int>(local[1] * m_params.b / m_clp.side_lengths[1]), 0, static_cast<int>(m_params.b) - 1);
+    const int ic = std::clamp(static_cast<int>(local[2] * m_params.c / m_clp.side_lengths[2]), 0, static_cast<int>(m_params.c) - 1);
+    cell_at(ia, ib, ic).add_entity(index, local, Entity::Type::Atom);
+  }
+}
+
 void CellList::cell_loop(const NeighbourCallback &callback) const {
   for (size_t cell_i = 0; cell_i < m_params.total_real; cell_i++) {
     size_t center_cell_idx = m_cell_indices[cell_i];

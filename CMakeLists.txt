@@ -35,6 +35,15 @@ if("${WITH_PYTHON_BINDINGS}")
 endif()
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CPM.cmake")
+
+# TBB's GNU.cmake guards -fcf-protection=full with `aarch64` but macOS ARM
+# reports `arm64` to CMake.  With GCC this flag is a hard error, so remap the
+# processor name before any dependency pulls in TBB.
+if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    message(STATUS "Remapping CMAKE_SYSTEM_PROCESSOR arm64 -> aarch64 for GCC/TBB compatibility")
+    set(CMAKE_SYSTEM_PROCESSOR "aarch64")
+endif()
+
 # don't use install commands from third party
 add_subdirectory(3rdparty EXCLUDE_FROM_ALL)
 add_subdirectory(include)

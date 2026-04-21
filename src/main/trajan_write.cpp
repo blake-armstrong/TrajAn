@@ -10,7 +10,7 @@ void run_write_subcommand(const WriteOpts &opts, Trajectory &traj,
 
   size_t frame_count = 0;
   while (traj.next_frame()) {
-    pipeline.apply(traj.frame());
+    pipeline.apply(traj.frame(), "write");
     traj.write_frame();
     frame_count++;
   }

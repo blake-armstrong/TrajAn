@@ -522,7 +522,7 @@ void run_qc_train(QCOpts const &opts, Trajectory &traj,
   int frame_num = 0;
 
   while (traj.next_frame()) {
-    pipeline.apply(traj.frame());
+    pipeline.apply(traj.frame(), "qc");
     const auto &carbonates = traj.get_molecules(parsed_sel);
 
     SurfaceState state;
@@ -628,7 +628,7 @@ void run_qc_analyse(QCOpts const &opts, Trajectory &traj,
   std::vector<int> config_counts(k + 1, 0);
 
   while (traj.next_frame()) {
-    pipeline.apply(traj.frame());
+    pipeline.apply(traj.frame(), "qc");
     if (frame_num == 0 || traj.topology_has_changed()) {
       carbonates = traj.get_molecules(parsed_sel);
     } else {

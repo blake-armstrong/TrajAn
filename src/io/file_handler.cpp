@@ -133,6 +133,7 @@ FileHandlerPtr write_output_file(const fs::path &file) {
 
   FileHandlerPtr handler = get_handler(ext);
   handler->set_file_path(file);
+  handler->initialise(FileHandler::Mode::Write);
 
   return handler;
 }

@@ -51,7 +51,7 @@ void run_rdf_subcommand(const RDFOpts &opts, Trajectory &traj,
 
   size_t frame_count = 0;
   while (traj.next_frame()) {
-    pipeline.apply(traj.frame());
+    pipeline.apply(traj.frame(), "rdf");
     if (frame_count == 0 || traj.topology_has_changed()) {
       entities1 = traj.get_entities(parsed_sel1, opts.mol_origin);
       entities2 = traj.get_entities(parsed_sel2, opts.mol_origin);

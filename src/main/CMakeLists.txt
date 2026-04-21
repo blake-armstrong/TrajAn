@@ -10,6 +10,7 @@ add_library(trajan_main
   "${CMAKE_CURRENT_SOURCE_DIR}/trajan_surface.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/trajan_wrap.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/trajan_dipole.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/trajan_solvate.cpp"
   #  "${CMAKE_CURRENT_SOURCE_DIR}/trajan_opt.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/version.cpp"
   ${TRAJAN_MAIN_INCLUDE_FILES}

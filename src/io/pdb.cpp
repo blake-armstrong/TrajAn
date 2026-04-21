@@ -19,6 +19,23 @@ using trajan::core::Frame;
 using trajan::units::radians;
 using Atom = trajan::core::EnhancedAtom;
 
+// Hybrid-36 encoding for PDB serial/sequence fields.
+// Decimal 1-99999, then A0000-ZZZZZ (26 * 36^4 additional values ~43M total).
+static std::string hybrid36(int n) {
+  if (n < 100000)
+    return fmt::format("{:5d}", n);
+  int v = n - 100000;
+  constexpr int p4 = 36 * 36 * 36 * 36;
+  char buf[6] = {static_cast<char>('A' + v / p4), 0, 0, 0, 0, 0};
+  v %= p4;
+  for (int i = 4; i >= 1; --i) {
+    int d = v % 36;
+    buf[i] = d < 10 ? '0' + d : 'A' + d - 10;
+    v /= 36;
+  }
+  return std::string(buf, 5);
+}
+
 bool PDBHandler::_initialise() {
   switch (m_mode) {
   case Mode::Read:
@@ -287,9 +304,9 @@ bool PDBHandler::write_next_frame(const Frame &frame) {
           bonded.push_back(m_original_ids ? atoms[nb].uindex
                                           : static_cast<int>(nb) + 1);
         for (size_t i = 0; i < bonded.size(); i += 4) {
-          std::string cl = fmt::format("CONECT{:5d}", main_serial);
+          std::string cl = fmt::format("CONECT{}", hybrid36(main_serial));
           for (size_t j = i; j < std::min(i + 4, bonded.size()); ++j)
-            cl += fmt::format("{:5d}", bonded[j]);
+            cl += hybrid36(bonded[j]);
           m_conect_lines.push_back(cl);
         }
       }
@@ -302,7 +319,7 @@ bool PDBHandler::write_next_frame(const Frame &frame) {
   for (const auto &atom : atoms) {
     int serial = m_original_ids ? atom.uindex : i;
     m_outfile << fmt::format(PDB_LINE_FMT_WRITE.data(),
-                             "ATOM", serial, ' ', atom.type, ' ',
+                             "ATOM", hybrid36(serial), ' ', atom.type, ' ',
                              atom.molecule_type, ' ', 'A',
                              atom.umolecule_index, ' ', "",
                              atom.x, atom.y, atom.z,

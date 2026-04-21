@@ -340,13 +340,13 @@ void run_pmepot_subcommand(const PmepotOpts &opts, Trajectory &traj,
 
   trajan::log::Progress progress("pmepot: frames processed");
 
-  pipeline.apply(frame);
+  pipeline.apply(frame, "pmepot");
   process_frame(frame);
   if (grid.frame_count % 100 == 0)
     progress.update(static_cast<int64_t>(grid.frame_count));
 
   while (traj.next_frame()) {
-    pipeline.apply(traj.frame());
+    pipeline.apply(traj.frame(), "pmepot");
     process_frame(traj.frame());
     if (grid.frame_count % 100 == 0)
       progress.update(static_cast<int64_t>(grid.frame_count));

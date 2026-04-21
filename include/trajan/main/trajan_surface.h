@@ -15,6 +15,7 @@ struct SurfaceOpts {
   std::optional<double> shift;
   double depth{1.0};
   bool atomic{false};
+  std::vector<int> x_direction;
   std::filesystem::path outfile;
 };
 

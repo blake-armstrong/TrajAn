@@ -20,7 +20,7 @@ void register_modify_transforms(const ModifyOpts &opts, Trajectory &traj,
       trajan::log::debug("modify: registering translate ({}, {}, {}) for all "
                          "atoms",
                          dx, dy, dz);
-      pipeline.add_transform([dx, dy, dz](trajan::core::Frame &frame) {
+      pipeline.add_transform("modify", [dx, dy, dz](trajan::core::Frame &frame) {
         for (auto &atom : frame.atoms()) {
           atom.x += dx;
           atom.y += dy;
@@ -36,7 +36,7 @@ void register_modify_transforms(const ModifyOpts &opts, Trajectory &traj,
 
       bool first_call = true;
       std::vector<core::EntityVariant> entities;
-      pipeline.add_transform([dx, dy, dz, parsed_sel, mol_origin, &traj,
+      pipeline.add_transform("modify", [dx, dy, dz, parsed_sel, mol_origin, &traj,
                                first_call,
                                entities](trajan::core::Frame &frame) mutable {
         if (first_call || traj.topology_has_changed()) {
@@ -115,7 +115,7 @@ void register_modify_transforms(const ModifyOpts &opts, Trajectory &traj,
       trajan::log::debug(
           "modify: registering rotate {:.4f} deg about {} for all atoms",
           angle_deg, axis_char);
-      pipeline.add_transform(
+      pipeline.add_transform("modify",
           [rotate_pos](trajan::core::Frame &frame) mutable {
             for (auto &atom : frame.atoms())
               rotate_pos(atom.x, atom.y, atom.z);
@@ -129,7 +129,7 @@ void register_modify_transforms(const ModifyOpts &opts, Trajectory &traj,
 
       bool first_call = true;
       std::vector<core::EntityVariant> entities;
-      pipeline.add_transform([rotate_pos, parsed_sel, mol_origin, &traj,
+      pipeline.add_transform("modify", [rotate_pos, parsed_sel, mol_origin, &traj,
                                first_call,
                                entities](trajan::core::Frame &frame) mutable {
         if (first_call || traj.topology_has_changed()) {
@@ -163,7 +163,7 @@ void register_modify_transforms(const ModifyOpts &opts, Trajectory &traj,
 
   if (opts.wrap) {
     trajan::log::debug("modify: registering PBC wrap");
-    pipeline.add_transform([](trajan::core::Frame &frame) {
+    pipeline.add_transform("modify", [](trajan::core::Frame &frame) {
       if (!frame.has_unit_cell()) {
         trajan::log::warn(
             "modify --wrap: frame has no unit cell, skipping wrap");
@@ -210,7 +210,7 @@ void register_modify_transforms(const ModifyOpts &opts, Trajectory &traj,
                                   const std::string &label) {
     if (raw_sel.empty()) {
       trajan::log::debug("modify: {} for all atoms", label);
-      pipeline.add_transform([setter_fn](trajan::core::Frame &frame) mutable {
+      pipeline.add_transform("modify", [setter_fn](trajan::core::Frame &frame) mutable {
         for (auto &atom : frame.atoms())
           setter_fn(atom);
       });
@@ -220,7 +220,7 @@ void register_modify_transforms(const ModifyOpts &opts, Trajectory &traj,
       trajan::log::debug("modify: {} for selection '{}'", label, raw_sel);
       bool first_call = true;
       std::vector<core::EntityVariant> entities;
-      pipeline.add_transform([setter_fn, parsed_sel, mol_origin, make_index_set,
+      pipeline.add_transform("modify", [setter_fn, parsed_sel, mol_origin, make_index_set,
                                &traj, first_call,
                                entities](trajan::core::Frame &frame) mutable {
         if (first_call || traj.topology_has_changed()) {

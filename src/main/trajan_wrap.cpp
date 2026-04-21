@@ -7,7 +7,7 @@ void register_wrap_transform(const WrapOpts &opts, Trajectory &traj,
                              Pipeline &pipeline) {
   if (opts.atomic) {
     trajan::log::debug("wrap: registering atomic PBC wrap");
-    pipeline.add_transform([](trajan::core::Frame &frame) {
+    pipeline.add_transform("wrap", [](trajan::core::Frame &frame) {
       if (!frame.has_unit_cell()) {
         trajan::log::warn("wrap: frame has no unit cell, skipping");
         return;
@@ -25,7 +25,7 @@ void register_wrap_transform(const WrapOpts &opts, Trajectory &traj,
     });
   } else {
     trajan::log::debug("wrap: registering molecular PBC wrap");
-    pipeline.add_transform([&traj](trajan::core::Frame &frame) mutable {
+    pipeline.add_transform("wrap", [&traj](trajan::core::Frame &frame) mutable {
       if (!frame.has_unit_cell()) {
         trajan::log::warn("wrap: frame has no unit cell, skipping");
         return;

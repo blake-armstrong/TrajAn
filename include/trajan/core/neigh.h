@@ -274,6 +274,11 @@ public:
     this->cell_loop(callback);
   };
 
+  void initialize_region(const Vec3 &origin, const Vec3 &box_size,
+                         const std::optional<UnitCell> &unit_cell = std::nullopt);
+  bool has_clash(const Vec3 &pos) const;
+  void insert_point(const Vec3 &pos, int index);
+
 protected:
   void update_impl(const CellListPacket &clp) override;
 
@@ -282,6 +287,7 @@ private:
   static constexpr size_t CELLDIVISOR = 2;
   static constexpr size_t GHOSTCELLS = CELLDIVISOR;
 
+  Vec3 m_origin{0.0, 0.0, 0.0};
   CellListPacket m_clp;
   CellListParameters m_params;
   std::vector<Cell> m_cells;

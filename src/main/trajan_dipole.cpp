@@ -224,7 +224,7 @@ void run_dipole_subcommand(const DipoleOpts &opts, Trajectory &traj,
   while (traj.next_frame()) {
     ++frame_count;
     progress.increment();
-    pipeline.apply(traj.frame());
+    pipeline.apply(traj.frame(), "dipole");
 
     const auto &atoms = traj.atoms();
     const auto &uc_opt = traj.unit_cell();

@@ -194,6 +194,36 @@ void run_surface_subcommand(const SurfaceOpts &opts, Trajectory &traj) {
     trajan::log::info("Found {} possible cut position(s)", cuts.size());
   }
 
+  // Compute in-plane rotation matrix to align x-axis with the requested [uvw].
+  occ::Mat3 rotation = occ::Mat3::Identity();
+  if (!opts.x_direction.empty()) {
+    const auto &dir = opts.x_direction;
+    occ::Vec3 dir_cart = uc.direct() * occ::Vec3(dir[0], dir[1], dir[2]);
+    occ::Vec3 normal = surface.normal_vector();
+    occ::Vec3 dir_proj = dir_cart - dir_cart.dot(normal) * normal;
+    if (dir_proj.norm() < 1e-6)
+      throw std::runtime_error(
+          "surface: --x-direction is parallel to the surface normal");
+    dir_proj.normalize();
+
+    const occ::Vec3 current_x = surface.a_vector().normalized();
+    const double cos_theta =
+        std::clamp(current_x.dot(dir_proj), -1.0, 1.0);
+    const occ::Vec3 cross = current_x.cross(dir_proj);
+    double sin_theta = cross.norm();
+    if (cross.dot(normal) < 0)
+      sin_theta = -sin_theta;
+
+    occ::Mat3 K;
+    K << 0, -normal(2), normal(1), normal(2), 0, -normal(0), -normal(1),
+        normal(0), 0;
+    rotation = cos_theta * occ::Mat3::Identity() + sin_theta * K +
+               (1.0 - cos_theta) * normal * normal.transpose();
+
+    trajan::log::info("Rotating slab x-axis to align with [{} {} {}]",
+                      dir[0], dir[1], dir[2]);
+  }
+
   auto out_handler = trajan::io::write_output_file(opts.outfile);
 
   int frame_count = 0;
@@ -205,6 +235,17 @@ void run_surface_subcommand(const SurfaceOpts &opts, Trajectory &traj) {
     trajan::core::Frame slab_frame =
         opts.atomic ? build_atomic_frame(slab_mols, frame_atoms, slab_uc)
                     : build_mol_frame(slab_mols, enhanced_mols, slab_uc);
+
+    if (!opts.x_direction.empty()) {
+      auto atoms = slab_frame.atoms();
+      for (auto &atom : atoms) {
+        const occ::Vec3 rot = rotation * occ::Vec3(atom.x, atom.y, atom.z);
+        atom.x = rot(0);
+        atom.y = rot(1);
+        atom.z = rot(2);
+      }
+      slab_frame.set_atoms(atoms);
+    }
 
     trajan::log::info("  frame {}: {} atoms", frame_count + 1,
                       slab_frame.num_atoms());
@@ -230,7 +271,7 @@ CLI::App *add_surface_subcommand(CLI::App &app, Trajectory &traj,
                    "Miller indices h k l (three integers, e.g. 1 0 0)")
       ->required()
       ->expected(3);
-  surf->add_option("outfile", opts->outfile, "Output PDB trajectory file")
+  surf->add_option("-o,--output", opts->outfile, "Output PDB trajectory file")
       ->required();
   surf->add_option("--shift", opts->shift,
                    "Fractional shift along the surface normal (0–1). "
@@ -241,6 +282,11 @@ CLI::App *add_surface_subcommand(CLI::App &app, Trajectory &traj,
   surf->add_flag("--atomic", opts->atomic,
                  "Cut at the atom level (molecules may be broken). "
                  "By default whole molecules are kept intact.");
+  surf->add_option("--x-direction", opts->x_direction,
+                   "Lattice direction [u v w] to align the slab x-axis with. "
+                   "The direction is projected onto the surface plane before "
+                   "alignment.")
+      ->expected(3);
 
   surf->callback([opts, &traj, &pipeline]() {
     trajan::log::set_subcommand_log_pattern("surface");
