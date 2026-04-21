@@ -11,9 +11,9 @@ using spdlog::set_level;
 using spdlog::trace;
 using spdlog::warn;
 
-constexpr std::string PATTERN_VERBOSE = "[%H:%M:%S]-[%^%l%$] %v";
-constexpr std::string PATTERN_WARN = "[%^%l%$] %v";
-constexpr std::string PATTERN_SIMPLE = "%v";
+inline const std::string PATTERN_VERBOSE = "[%H:%M:%S]-[%^%l%$] %v";
+inline const std::string PATTERN_WARN = "[%^%l%$] %v";
+inline const std::string PATTERN_SIMPLE = "%v";
 constexpr size_t LINE_WIDTH = 100;
 
 namespace level {

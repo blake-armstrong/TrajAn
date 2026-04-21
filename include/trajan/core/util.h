@@ -1,5 +1,7 @@
 #pragma once
+#include <algorithm>
 #include <ankerl/unordered_dense.h>
+#include <bitset>
 #include <cctype>
 #include <filesystem>
 #include <occ/crystal/unitcell.h>

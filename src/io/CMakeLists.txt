@@ -6,7 +6,7 @@ add_library(trajan_io "${CMAKE_CURRENT_SOURCE_DIR}/pdb.cpp"
                      "${CMAKE_CURRENT_SOURCE_DIR}/xtc.cpp"
 )
 
-target_link_libraries(trajan_io PUBLIC Eigen3::Eigen fmt::fmt spdlog::spdlog unordered_dense::unordered_dense occ_crystal xtc::xtc)
+target_link_libraries(trajan_io PUBLIC Eigen3::Eigen fmt::fmt spdlog::spdlog unordered_dense::unordered_dense occ_crystal)
 
 target_include_directories(trajan_io PUBLIC "${TRAJAN_INCLUDE_DIR}")
 

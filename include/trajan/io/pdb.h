@@ -12,7 +12,7 @@ constexpr std::string_view PDB_LINE_FMT_READ =
 constexpr std::string_view PDB_CONECT_FMT_READ = "%6c%5d%5d%5d%5d%5d";
 
 constexpr std::string_view PDB_LINE_FMT_WRITE =
-    "{:<6}{:>5}{:1}{:>4}{:1}{:>3}{:1}{:1}{:>4}{:1}{:>3}{:8.3f}{:8.3f}{:8.3f}{:"
+    "{:<6}{:5}{:1}{:>4}{:1}{:>3}{:1}{:1}{:>4}{:1}{:>3}{:8.3f}{:8.3f}{:8.3f}{:"
     "6.2f}{:6.2f}{:10}{:>2}{:8.4f}";
 
 class PDBHandler : public FileHandler {
