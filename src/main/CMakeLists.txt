@@ -16,7 +16,7 @@ add_library(trajan_main
   ${TRAJAN_MAIN_INCLUDE_FILES}
 )
 
-target_link_libraries(trajan_main PUBLIC trajan_core trajan_io CLI11::CLI11)
+target_link_libraries(trajan_main PUBLIC trajan_core trajan_io CLI11::CLI11 TBB::tbb)
 # target_link_libraries(trajan_main PUBLIC trajan_core trajan_io trajan_energy CLI11::CLI11)
 
 target_include_directories(trajan_main PUBLIC 

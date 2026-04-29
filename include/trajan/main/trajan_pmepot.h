@@ -16,6 +16,10 @@ struct PmepotOpts {
   std::vector<int> grid{};  // explicit Na Nb Nc (overrides spacing)
   double ewaldcof{0.25};    // Ewald coefficient β in Å⁻¹
   int order{4};             // B-spline order
+  bool real_space{false};   // use direct real-space Coulomb sum instead of PME
+  double cutoff{10.0};      // neighbour cutoff for real-space sum (Å)
+  bool grid_spread{false};  // pmepot_custom style: B-spline charge grid + grid-space sum
+  int cell_radius{2};       // ±cell search radius for --grid-spread
 };
 
 void run_pmepot_subcommand(const PmepotOpts &opts, Trajectory &traj,

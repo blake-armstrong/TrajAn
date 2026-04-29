@@ -7,7 +7,11 @@
 #include <occ/core/constants.h>
 #include <occ/crystal/unitcell.h>
 
+#include <tbb/combinable.h>
+#include <tbb/parallel_for.h>
+
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <complex>
 #include <fstream>
@@ -280,6 +284,215 @@ struct PmepotGrid {
   }
 };
 
+// ── RealspacePotGrid ──────────────────────────────────────────────────────
+
+struct RealspacePotGrid {
+  size_t Na, Nb, Nc;
+  double cutoff;
+  std::vector<double> accum;
+  size_t frame_count{0};
+
+  RealspacePotGrid(size_t Na, size_t Nb, size_t Nc, double cutoff)
+      : Na(Na), Nb(Nb), Nc(Nc), cutoff(cutoff), accum(Na * Nb * Nc, 0.0) {}
+
+  // For each charged atom, directly search the nearby grid-index box and
+  // accumulate KE·q/r. Parallelised over atoms via TBB; thread-local
+  // accumulation avoids races without atomics.
+  void accumulate_frame(const std::vector<trajan::core::EnhancedAtom> &atoms,
+                        const UnitCell &uc) {
+    std::vector<double> charges;
+    std::vector<occ::Vec3> atom_carts;
+    for (const auto &a : atoms) {
+      if (a.charge == 0.0) continue;
+      charges.push_back(a.charge);
+      atom_carts.emplace_back(a.x, a.y, a.z);
+    }
+    if (charges.empty()) { ++frame_count; return; }
+
+    const size_t N_charged = charges.size();
+    trajan::log::debug("pmepot: frame {}: {} charged atoms, {}×{}×{}={} grid points",
+                       frame_count + 1, N_charged, Na, Nb, Nc, Na * Nb * Nc);
+
+    const occ::Mat3 D    = uc.direct();
+    const occ::Mat3 Dinv = D.inverse();
+    // Search radius in grid cells along each lattice direction (conservative).
+    const int ra  = static_cast<int>(std::ceil(cutoff * Na / uc.a())) + 1;
+    const int rb  = static_cast<int>(std::ceil(cutoff * Nb / uc.b())) + 1;
+    const int rc  = static_cast<int>(std::ceil(cutoff * Nc / uc.c())) + 1;
+    const int iNa = static_cast<int>(Na);
+    const int iNb = static_cast<int>(Nb);
+    const int iNc = static_cast<int>(Nc);
+    const double off_a   = (Na - 1) * 0.5;
+    const double off_b   = (Nb - 1) * 0.5;
+    const double off_c   = (Nc - 1) * 0.5;
+    const double cutoffsq = cutoff * cutoff;
+    trajan::log::debug("pmepot: search box ±{}×{}×{} cells, starting TBB loop", ra, rb, rc);
+
+    auto t0 = std::chrono::steady_clock::now();
+
+    // Each TBB thread accumulates into its own private vector to avoid races.
+    tbb::combinable<std::vector<double>> local_accum(
+        [&] { return std::vector<double>(Na * Nb * Nc, 0.0); });
+
+    tbb::parallel_for(
+        tbb::blocked_range<size_t>(0, N_charged),
+        [&](const tbb::blocked_range<size_t> &range) {
+          auto &lacc = local_accum.local();
+          for (size_t j = range.begin(); j < range.end(); ++j) {
+            const occ::Vec3 &ac = atom_carts[j];
+            // Atom fractional position, wrapped to [0,1).
+            occ::Vec3 af = Dinv * ac;
+            af.array() -= af.array().floor();
+            // Grid index nearest to the atom's fractional position.
+            const int ci_a = static_cast<int>(std::round(af[0] * Na + off_a));
+            const int ci_b = static_cast<int>(std::round(af[1] * Nb + off_b));
+            const int ci_c = static_cast<int>(std::round(af[2] * Nc + off_c));
+
+            for (int da = -ra; da <= ra; ++da) {
+              const int ia = ((ci_a + da) % iNa + iNa) % iNa;
+              // Fractional difference along a (minimum image applied below).
+              const double dfa = (ia - off_a) / Na - af[0];
+              for (int db = -rb; db <= rb; ++db) {
+                const int ib = ((ci_b + db) % iNb + iNb) % iNb;
+                const double dfb = (ib - off_b) / Nb - af[1];
+                for (int dc = -rc; dc <= rc; ++dc) {
+                  const int ic = ((ci_c + dc) % iNc + iNc) % iNc;
+                  const double dfc = (ic - off_c) / Nc - af[2];
+                  // Minimum image in fractional space, then to Cartesian.
+                  const occ::Vec3 df(dfa - std::round(dfa),
+                                     dfb - std::round(dfb),
+                                     dfc - std::round(dfc));
+                  const double rsq = (D * df).squaredNorm();
+                  if (rsq < 1e-10 || rsq > cutoffsq) continue;
+                  lacc[ia * Nb * Nc + ib * Nc + ic] +=
+                      KE * charges[j] / std::sqrt(rsq);
+                }
+              }
+            }
+          }
+        });
+
+    // Reduce thread-local results into the running accumulator.
+    local_accum.combine_each([&](const std::vector<double> &la) {
+      for (size_t i = 0; i < Na * Nb * Nc; ++i)
+        accum[i] += la[i];
+    });
+
+    auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
+                  std::chrono::steady_clock::now() - t0).count();
+    trajan::log::debug("pmepot: accumulate_frame done in {}ms", dt);
+    ++frame_count;
+  }
+
+  // pmepot_custom style: spread charges onto Q via B-splines, then for each
+  // grid point sum KE·Q[neighbor]/dist over all neighbors within ±cell_radius
+  // cells. The inv_dist table is precomputed once per frame (one sqrt per
+  // unique offset), so the inner loop is only a multiply-add per neighbor.
+  void accumulate_frame_grid_spread(
+      const std::vector<trajan::core::EnhancedAtom> &atoms,
+      const UnitCell &uc, int cell_radius, int order) {
+
+    trajan::log::debug("pmepot: frame {}: grid-spread mode, cell_radius={}",
+                       frame_count + 1, cell_radius);
+    auto t0 = std::chrono::steady_clock::now();
+
+    // ── 1. Spread atomic charges onto Q via B-splines (VMD convention) ──
+    std::vector<float> Q(Na * Nb * Nc, 0.0f);
+    const int iNa = static_cast<int>(Na);
+    const int iNb = static_cast<int>(Nb);
+    const int iNc = static_cast<int>(Nc);
+    for (const auto &atom : atoms) {
+      if (atom.charge == 0.0) continue;
+      occ::Vec3 frac = uc.to_fractional(occ::Vec3(atom.x, atom.y, atom.z));
+      frac = frac.array() - frac.array().floor();
+      const double wa = frac[0] * Na + (Na - 1) * 0.5;
+      const double wb = frac[1] * Nb + (Nb - 1) * 0.5;
+      const double wc = frac[2] * Nc + (Nc - 1) * 0.5;
+      const auto wts_a = bspline_weights(wa, order);
+      const auto wts_b = bspline_weights(wb, order);
+      const auto wts_c = bspline_weights(wc, order);
+      const int i0a = static_cast<int>(std::floor(wa));
+      const int i0b = static_cast<int>(std::floor(wb));
+      const int i0c = static_cast<int>(std::floor(wc));
+      for (int ka = 0; ka < order; ++ka) {
+        const int ia = ((i0a - ka) % iNa + iNa) % iNa;
+        const float wa_q = static_cast<float>(atom.charge * wts_a[ka]);
+        for (int kb = 0; kb < order; ++kb) {
+          const int ib = ((i0b - kb) % iNb + iNb) % iNb;
+          const float wab_q = wa_q * static_cast<float>(wts_b[kb]);
+          for (int kc = 0; kc < order; ++kc) {
+            const int ic = ((i0c - kc) % iNc + iNc) % iNc;
+            Q[ia * iNb * iNc + ib * iNc + ic] +=
+                wab_q * static_cast<float>(wts_c[kc]);
+          }
+        }
+      }
+    }
+    auto t1 = std::chrono::steady_clock::now();
+    trajan::log::debug("pmepot: charge spreading done in {}ms",
+                       std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count());
+
+    // ── 2. Precompute inv_dist for every (da,db,dc) offset in [-R,R]³ ──
+    // The Cartesian vector from grid point (ia,ib,ic) to its neighbor at
+    // offset (da,db,dc) is D·(da/Na, db/Nb, dc/Nc) — constant for fixed offset.
+    const int R   = cell_radius;
+    const int box = 2 * R + 1;
+    const occ::Mat3 D = uc.direct();
+    std::vector<double> inv_dist(box * box * box, 0.0);
+    for (int da = -R; da <= R; ++da)
+      for (int db = -R; db <= R; ++db)
+        for (int dc = -R; dc <= R; ++dc) {
+          if (da == 0 && db == 0 && dc == 0) continue;
+          const occ::Vec3 dr = D * occ::Vec3(static_cast<double>(da) / Na,
+                                             static_cast<double>(db) / Nb,
+                                             static_cast<double>(dc) / Nc);
+          inv_dist[(da + R) * box * box + (db + R) * box + (dc + R)] =
+              1.0 / dr.norm();
+        }
+
+    // ── 3. Convolve Q with inv_dist, accumulate into accum ──
+    // Parallelise over the outer (ia) dimension — no race since each output
+    // grid point maps to a unique accum index.
+    tbb::parallel_for(
+        tbb::blocked_range<size_t>(0, Na),
+        [&](const tbb::blocked_range<size_t> &range) {
+          for (size_t ia = range.begin(); ia < range.end(); ++ia) {
+            for (size_t ib = 0; ib < Nb; ++ib) {
+              for (size_t ic = 0; ic < Nc; ++ic) {
+                double phi = 0.0;
+                for (int da = -R; da <= R; ++da) {
+                  const int ia2 = (static_cast<int>(ia) + da + iNa * (R + 1)) % iNa;
+                  for (int db = -R; db <= R; ++db) {
+                    const int ib2 = (static_cast<int>(ib) + db + iNb * (R + 1)) % iNb;
+                    for (int dc = -R; dc <= R; ++dc) {
+                      if (da == 0 && db == 0 && dc == 0) continue;
+                      const int ic2 = (static_cast<int>(ic) + dc + iNc * (R + 1)) % iNc;
+                      phi += Q[ia2 * iNb * iNc + ib2 * iNc + ic2] *
+                             inv_dist[(da + R) * box * box + (db + R) * box + (dc + R)];
+                    }
+                  }
+                }
+                accum[ia * Nb * Nc + ib * Nc + ic] += KE * phi;
+              }
+            }
+          }
+        });
+
+    auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
+                  std::chrono::steady_clock::now() - t1).count();
+    trajan::log::debug("pmepot: grid convolution done in {}ms", dt);
+    ++frame_count;
+  }
+
+  std::vector<double> average() const {
+    std::vector<double> avg(accum.size());
+    const double inv_n = frame_count > 0 ? 1.0 / frame_count : 1.0;
+    for (size_t i = 0; i < accum.size(); ++i)
+      avg[i] = accum[i] * inv_n;
+    return avg;
+  }
+};
+
 // ── Subcommand ────────────────────────────────────────────────────────────
 
 void run_pmepot_subcommand(const PmepotOpts &opts, Trajectory &traj,
@@ -306,57 +519,94 @@ void run_pmepot_subcommand(const PmepotOpts &opts, Trajectory &traj,
     Nc = fft_friendly(static_cast<size_t>(std::ceil(uc0.c() / opts.spacing)));
   }
 
-  trajan::log::info(
-      "pmepot: grid {}×{}×{} (spacing ~{:.3f}/{:.3f}/{:.3f} Å), "
-      "β={:.4f} Å⁻¹, order={}",
-      Na, Nb, Nc, uc0.a() / Na, uc0.b() / Nb, uc0.c() / Nc,
-      opts.ewaldcof, opts.order);
-
-  PmepotGrid grid(Na, Nb, Nc, opts.order, opts.ewaldcof);
-  grid.build_green(uc0);
-
-  // Track the last cell to detect changes (NPT trajectories).
-  UnitCell last_uc = uc0;
-
-  auto process_frame = [&](trajan::core::Frame &fr) {
-    const UnitCell &uc = fr.unit_cell().value();
-
-    // Recompute Green's function only when the cell has changed noticeably.
-    if (std::abs(uc.a() - last_uc.a()) > 1e-4 ||
-        std::abs(uc.b() - last_uc.b()) > 1e-4 ||
-        std::abs(uc.c() - last_uc.c()) > 1e-4 ||
-        std::abs(uc.alpha() - last_uc.alpha()) > 1e-6 ||
-        std::abs(uc.beta()  - last_uc.beta())  > 1e-6 ||
-        std::abs(uc.gamma() - last_uc.gamma()) > 1e-6) {
-      trajan::log::debug("pmepot: cell changed at frame {}, rebuilding Green's function",
-                         grid.frame_count + 1);
-      grid.build_green(uc);
-      last_uc = uc;
-    }
-
-    grid.spread_charges(fr.atoms(), uc);
-    grid.fft_and_accumulate();
-  };
-
-  trajan::log::Progress progress("pmepot: frames processed");
-
-  pipeline.apply(frame, "pmepot");
-  process_frame(frame);
-  if (grid.frame_count % 100 == 0)
-    progress.update(static_cast<int64_t>(grid.frame_count));
-
-  while (traj.next_frame()) {
-    pipeline.apply(traj.frame(), "pmepot");
-    process_frame(traj.frame());
-    if (grid.frame_count % 100 == 0)
-      progress.update(static_cast<int64_t>(grid.frame_count));
+  if (opts.real_space && opts.grid_spread) {
+    trajan::log::info(
+        "pmepot: grid-spread real-space on {}×{}×{} grid "
+        "(spacing ~{:.3f}/{:.3f}/{:.3f} Å), B-spline order={}, cell_radius={} ({}×{}×{} neighborhood)",
+        Na, Nb, Nc, uc0.a() / Na, uc0.b() / Nb, uc0.c() / Nc,
+        opts.order, opts.cell_radius,
+        2 * opts.cell_radius + 1, 2 * opts.cell_radius + 1, 2 * opts.cell_radius + 1);
+  } else if (opts.real_space) {
+    trajan::log::info(
+        "pmepot: real-space direct Coulomb sum on {}×{}×{} grid "
+        "(spacing ~{:.3f}/{:.3f}/{:.3f} Å), cutoff={:.2f} Å",
+        Na, Nb, Nc, uc0.a() / Na, uc0.b() / Nb, uc0.c() / Nc, opts.cutoff);
+  } else {
+    trajan::log::info(
+        "pmepot: reciprocal-space PME on {}×{}×{} grid "
+        "(spacing ~{:.3f}/{:.3f}/{:.3f} Å), β={:.4f} Å⁻¹, order={}",
+        Na, Nb, Nc, uc0.a() / Na, uc0.b() / Nb, uc0.c() / Nc,
+        opts.ewaldcof, opts.order);
   }
 
-  progress.finish(fmt::format("pmepot: averaged over {} frame(s)", grid.frame_count));
-  trajan::log::info("pmepot: averaged over {} frame(s)", grid.frame_count);
+  UnitCell last_uc = uc0;
+  trajan::log::Progress progress("pmepot: frames processed");
 
-  const auto avg = grid.average();
-  write_dx(opts.outfile, avg, Na, Nb, Nc, last_uc);
+  if (opts.real_space) {
+    RealspacePotGrid grid(Na, Nb, Nc, opts.cutoff);
+
+    auto process_frame = [&](trajan::core::Frame &fr) {
+      if (opts.grid_spread)
+        grid.accumulate_frame_grid_spread(fr.atoms(), fr.unit_cell().value(),
+                                          opts.cell_radius, opts.order);
+      else
+        grid.accumulate_frame(fr.atoms(), fr.unit_cell().value());
+    };
+
+    pipeline.apply(frame, "pmepot");
+    process_frame(frame);
+    if (grid.frame_count % 100 == 0)
+      progress.update(static_cast<int64_t>(grid.frame_count));
+
+    while (traj.next_frame()) {
+      pipeline.apply(traj.frame(), "pmepot");
+      process_frame(traj.frame());
+      last_uc = traj.frame().unit_cell().value();
+      if (grid.frame_count % 100 == 0)
+        progress.update(static_cast<int64_t>(grid.frame_count));
+    }
+
+    progress.finish(fmt::format("pmepot: averaged over {} frame(s)", grid.frame_count));
+    trajan::log::info("pmepot: averaged over {} frame(s)", grid.frame_count);
+    write_dx(opts.outfile, grid.average(), Na, Nb, Nc, last_uc);
+  } else {
+    PmepotGrid grid(Na, Nb, Nc, opts.order, opts.ewaldcof);
+    grid.build_green(uc0);
+
+    auto process_frame = [&](trajan::core::Frame &fr) {
+      const UnitCell &uc = fr.unit_cell().value();
+      if (std::abs(uc.a() - last_uc.a()) > 1e-4 ||
+          std::abs(uc.b() - last_uc.b()) > 1e-4 ||
+          std::abs(uc.c() - last_uc.c()) > 1e-4 ||
+          std::abs(uc.alpha() - last_uc.alpha()) > 1e-6 ||
+          std::abs(uc.beta()  - last_uc.beta())  > 1e-6 ||
+          std::abs(uc.gamma() - last_uc.gamma()) > 1e-6) {
+        trajan::log::debug("pmepot: cell changed at frame {}, rebuilding Green's function",
+                           grid.frame_count + 1);
+        grid.build_green(uc);
+        last_uc = uc;
+      }
+      grid.spread_charges(fr.atoms(), uc);
+      grid.fft_and_accumulate();
+    };
+
+    pipeline.apply(frame, "pmepot");
+    process_frame(frame);
+    if (grid.frame_count % 100 == 0)
+      progress.update(static_cast<int64_t>(grid.frame_count));
+
+    while (traj.next_frame()) {
+      pipeline.apply(traj.frame(), "pmepot");
+      process_frame(traj.frame());
+      if (grid.frame_count % 100 == 0)
+        progress.update(static_cast<int64_t>(grid.frame_count));
+    }
+
+    progress.finish(fmt::format("pmepot: averaged over {} frame(s)", grid.frame_count));
+    trajan::log::info("pmepot: averaged over {} frame(s)", grid.frame_count);
+    write_dx(opts.outfile, grid.average(), Na, Nb, Nc, last_uc);
+  }
+
   trajan::log::info("pmepot: wrote potential to {}", opts.outfile);
 }
 
@@ -388,6 +638,23 @@ CLI::App *add_pmepot_subcommand(CLI::App &app, Trajectory &traj,
   cmd->add_option("--order", opts->order,
                   "B-spline interpolation order (4 = cubic, must be ≥ 2)")
       ->default_val(4)
+      ->capture_default_str();
+  cmd->add_flag("--real-space", opts->real_space,
+                "Compute potential by direct real-space Coulomb sum (O(N·Ng)) "
+                "instead of PME.");
+  cmd->add_option("--cutoff", opts->cutoff,
+                  "Neighbour cutoff radius in Å for --real-space mode.")
+      ->default_val(10.0)
+      ->capture_default_str();
+  cmd->add_flag("--grid-spread", opts->grid_spread,
+                "Grid-space real-space (pmepot_custom style): spread charges "
+                "onto the grid via B-splines, then sum KE·Q[neighbor]/dist "
+                "over a fixed cell neighborhood. Requires --real-space. "
+                "--cutoff is ignored; use --cell-radius instead.");
+  cmd->add_option("--cell-radius", opts->cell_radius,
+                  "Neighbor search radius in grid cells for --grid-spread "
+                  "(default 2 = 5×5×5 = 125 neighbors, matching pmepot_custom).")
+      ->default_val(2)
       ->capture_default_str();
 
   cmd->callback([opts, &traj, &pipeline]() {
